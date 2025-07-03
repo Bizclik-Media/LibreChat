@@ -27,6 +27,8 @@ export class MCPManager {
   private mcpConfigs: t.MCPServers = {};
   /** Store MCP server instructions */
   private serverInstructions: Map<string, string> = new Map();
+  /** Track session information for monitoring */
+  private sessionTracker: Map<string, Map<string, t.MCPSessionInfo | null>> = new Map();
 
   public static getInstance(): MCPManager {
     if (!MCPManager.instance) {
@@ -153,6 +155,9 @@ export class MCPManager {
             connection.emit('oauthFailed', new Error('OAuth authentication failed'));
           }
         });
+
+        /** Listen for session events */
+        this.setupSessionEventHandlers(connection, serverName, CONSTANTS.SYSTEM_USER_ID);
 
         try {
           const connectTimeout = config.initTimeout ?? 30000;
@@ -537,6 +542,9 @@ export class MCPManager {
         connection?.emit('oauthFailed', new Error('OAuth authentication failed'));
       }
     });
+
+    /** Listen for session events */
+    this.setupSessionEventHandlers(connection, serverName, userId);
 
     try {
       const connectTimeout = config.initTimeout ?? 30000;
@@ -931,6 +939,77 @@ export class MCPManager {
     this.connections.clear();
 
     logger.info('[MCP] All connections processed for disconnection.');
+  }
+
+  /** Set up session event handlers for a connection */
+  private setupSessionEventHandlers(connection: MCPConnection, serverName: string, userId: string): void {
+    const logPrefix = userId === CONSTANTS.SYSTEM_USER_ID ? `[MCP][${serverName}]` : `[MCP][User: ${userId}][${serverName}]`;
+
+    connection.on('sessionCreated', (sessionInfo: t.MCPSessionInfo) => {
+      logger.info(`${logPrefix} Session created: ${sessionInfo.sessionId.substring(0, 8)}...`);
+      this.trackSession(userId, serverName, sessionInfo);
+    });
+
+    connection.on('sessionTerminated', (sessionInfo: t.MCPSessionInfo) => {
+      logger.info(`${logPrefix} Session terminated: ${sessionInfo.sessionId.substring(0, 8)}...`);
+      this.trackSession(userId, serverName, null);
+    });
+
+    connection.on('sessionCleared', () => {
+      logger.debug(`${logPrefix} Session cleared`);
+      this.trackSession(userId, serverName, null);
+    });
+
+    connection.on('sessionError', (error: t.SessionError) => {
+      logger.warn(`${logPrefix} Session error: ${error.type} - ${error.message}`);
+      // Session errors are handled by the connection's recovery logic
+    });
+  }
+
+  /** Track session information for monitoring */
+  private trackSession(userId: string, serverName: string, sessionInfo: t.MCPSessionInfo | null): void {
+    if (!this.sessionTracker.has(userId)) {
+      this.sessionTracker.set(userId, new Map());
+    }
+
+    const userSessions = this.sessionTracker.get(userId)!;
+    userSessions.set(serverName, sessionInfo);
+
+    // Clean up empty user session maps
+    if (sessionInfo === null && userSessions.size === 0) {
+      this.sessionTracker.delete(userId);
+    }
+  }
+
+  /** Get session information for a specific user and server */
+  public getSessionInfo(userId: string, serverName: string): t.MCPSessionInfo | null {
+    return this.sessionTracker.get(userId)?.get(serverName) || null;
+  }
+
+  /** Get all active sessions for monitoring */
+  public getAllActiveSessions(): Map<string, Map<string, t.MCPSessionInfo | null>> {
+    return new Map(this.sessionTracker);
+  }
+
+  /** Get session statistics for monitoring */
+  public getSessionStats(): { totalUsers: number; totalSessions: number; activeSessions: number } {
+    let totalSessions = 0;
+    let activeSessions = 0;
+
+    for (const userSessions of this.sessionTracker.values()) {
+      for (const sessionInfo of userSessions.values()) {
+        totalSessions++;
+        if (sessionInfo && !sessionInfo.terminated) {
+          activeSessions++;
+        }
+      }
+    }
+
+    return {
+      totalUsers: this.sessionTracker.size,
+      totalSessions,
+      activeSessions,
+    };
   }
 
   /** Destroys the singleton instance and disconnects all connections */

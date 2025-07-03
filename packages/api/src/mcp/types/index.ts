@@ -52,6 +52,26 @@ export interface MCPPrompt {
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+/** Session management types for MCP connections */
+export interface MCPSessionInfo {
+  /** The session ID assigned by the server */
+  sessionId: string;
+  /** Timestamp when the session was created */
+  createdAt: Date;
+  /** Whether the session has been terminated */
+  terminated: boolean;
+}
+
+/** Session error types */
+export type SessionErrorType = 'session_expired' | 'session_invalid' | 'session_terminated';
+
+/** Session-related error information */
+export interface SessionError {
+  type: SessionErrorType;
+  sessionId?: string;
+  message: string;
+}
+
 export type MCPTool = z.infer<typeof t.ToolSchema>;
 export type MCPToolListResponse = z.infer<typeof t.ListToolsResultSchema>;
 export type ToolContentPart = t.TextContent | t.ImageContent | t.EmbeddedResource | t.AudioContent;
