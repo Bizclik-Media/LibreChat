@@ -14,7 +14,8 @@ cache: true
 interface:
   customWelcome: "Welcome to BizClik AI!"
   # MCP Servers UI configuration
-
+  mcpServers:
+    placeholder: 'MCP Servers'
   # Privacy policy settings
   privacyPolicy:
     externalUrl: 'https://librechat.ai/privacy-policy'
