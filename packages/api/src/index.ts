@@ -1,5 +1,6 @@
 /* MCP */
 export * from './mcp/manager';
+export * from './mcp/session';
 export * from './mcp/oauth';
 export * from './mcp/auth';
 /* Utilities */
@@ -21,4 +22,5 @@ export * from './endpoints';
 export * from './files';
 /* types */
 export type * from './mcp/types';
+export type * from './mcp/session/types';
 export type * from './flow/types';

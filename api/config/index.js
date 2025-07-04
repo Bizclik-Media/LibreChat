@@ -1,21 +1,21 @@
 const { EventSource } = require('eventsource');
 const { Time } = require('librechat-data-provider');
-const { MCPManager, FlowStateManager } = require('@librechat/api');
+const { SessionAwareMCPManager, FlowStateManager } = require('@librechat/api');
 const logger = require('./winston');
 
 global.EventSource = EventSource;
 
-/** @type {MCPManager} */
+/** @type {SessionAwareMCPManager} */
 let mcpManager = null;
 let flowManager = null;
 
 /**
  * @param {string} [userId] - Optional user ID, to avoid disconnecting the current user.
- * @returns {MCPManager}
+ * @returns {SessionAwareMCPManager}
  */
 function getMCPManager(userId) {
   if (!mcpManager) {
-    mcpManager = MCPManager.getInstance();
+    mcpManager = SessionAwareMCPManager.getInstance();
   } else {
     mcpManager.checkIdleConnections(userId);
   }
