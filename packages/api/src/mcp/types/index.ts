@@ -50,7 +50,7 @@ export interface MCPPrompt {
   arguments?: Array<{ name: string }>;
 }
 
-export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error' | 'reconnecting';
 
 /** Session management types for MCP connections */
 export interface MCPSessionInfo {
@@ -62,8 +62,8 @@ export interface MCPSessionInfo {
   terminated: boolean;
 }
 
-/** Session error types */
-export type SessionErrorType = 'session_expired' | 'session_invalid' | 'session_terminated';
+/** Session error types based on MCP specification */
+export type SessionErrorType = 'session_terminated' | 'session_invalid' | 'session_expired';
 
 /** Session-related error information */
 export interface SessionError {

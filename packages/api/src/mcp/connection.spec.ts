@@ -44,7 +44,9 @@ jest.mock('@modelcontextprotocol/sdk/client/http.js', () => ({
 }));
 
 // Mock fetch for session termination
-global.fetch = jest.fn();
+const mockFetch = jest.fn();
+Object.assign(mockFetch, { preconnect: jest.fn() });
+global.fetch = mockFetch as any;
 
 describe('MCPConnection Session Management', () => {
   let connection: MCPConnection;
@@ -202,7 +204,7 @@ describe('MCPConnection Session Management', () => {
 
   describe('Session Termination', () => {
     beforeEach(() => {
-      (global.fetch as jest.Mock).mockResolvedValue({
+      (mockFetch as jest.Mock).mockResolvedValue({
         ok: true,
         status: 200,
       });
@@ -231,7 +233,7 @@ describe('MCPConnection Session Management', () => {
     });
 
     it('should handle 405 Method Not Allowed gracefully', async () => {
-      (global.fetch as jest.Mock).mockResolvedValue({
+      (mockFetch as jest.Mock).mockResolvedValue({
         ok: false,
         status: 405,
       });

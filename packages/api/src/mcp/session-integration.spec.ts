@@ -28,7 +28,9 @@ jest.mock('@modelcontextprotocol/sdk/client/http.js', () => ({
 }));
 
 // Mock fetch for session termination
-global.fetch = jest.fn();
+const mockFetch = jest.fn();
+Object.assign(mockFetch, { preconnect: jest.fn() });
+global.fetch = mockFetch as any;
 
 describe('MCP Session Integration Tests', () => {
   let manager: MCPManager;
@@ -37,7 +39,7 @@ describe('MCP Session Integration Tests', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    
+
     mockOptions = {
       type: 'streamable-http',
       url: 'https://example.com/mcp',
@@ -48,7 +50,7 @@ describe('MCP Session Integration Tests', () => {
     connection = new MCPConnection('test-server', mockOptions);
 
     // Mock fetch responses
-    (global.fetch as jest.Mock).mockResolvedValue({
+    (mockFetch as jest.Mock).mockResolvedValue({
       ok: true,
       status: 200,
     });
@@ -77,7 +79,6 @@ describe('MCP Session Integration Tests', () => {
         type: 'session_terminated',
         message: 'Session terminated',
         sessionId: 'test-session-123',
-        timestamp: new Date(),
       };
 
       // Trigger session recovery
@@ -103,7 +104,6 @@ describe('MCP Session Integration Tests', () => {
         type: 'session_expired',
         message: 'Session expired',
         sessionId: 'test-session-123',
-        timestamp: new Date(),
       };
 
       await (connection as any).handleSessionRecovery(sessionError);
@@ -121,7 +121,6 @@ describe('MCP Session Integration Tests', () => {
         type: 'session_terminated',
         message: 'Session terminated',
         sessionId: 'test-session-123',
-        timestamp: new Date(),
       };
 
       await (connection as any).handleSessionRecovery(sessionError);
@@ -146,7 +145,6 @@ describe('MCP Session Integration Tests', () => {
         type: 'session_terminated',
         message: 'Session terminated',
         sessionId: 'test-session-123',
-        timestamp: new Date(),
       };
 
       await expect((connection as any).handleSessionRecovery(sessionError)).rejects.toThrow('Connection failed');
@@ -238,7 +236,7 @@ describe('MCP Session Integration Tests', () => {
       (connection as any).transport = mockTransport;
 
       const sessionErrorSpy = jest.spyOn(connection, 'emit');
-      const handleRecoverySpy = jest.spyOn(connection as any, 'handleSessionRecovery').mockResolvedValue();
+      const handleRecoverySpy = jest.spyOn(connection as any, 'handleSessionRecovery').mockResolvedValue(undefined);
 
       // Set up transport error handlers
       (connection as any).setupTransportErrorHandlers(mockTransport);

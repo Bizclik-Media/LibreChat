@@ -1,4 +1,5 @@
 import type * as t from './types';
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 const RECOGNIZED_PROVIDERS = new Set([
   'google',
   'anthropic',
@@ -39,7 +40,7 @@ function isImageContent(item: t.ToolContentPart): item is t.ImageContent {
   return item.type === 'image';
 }
 
-function parseAsString(result: t.MCPToolCallResponse): string {
+function parseAsString(result: CallToolResult): string {
   const content = result?.content ?? [];
   if (!content.length) {
     return '(No response)';
@@ -90,12 +91,12 @@ function parseAsString(result: t.MCPToolCallResponse): string {
  * First element: string or formatted content (excluding image_url)
  * Second element: image_url content if any
  *
- * @param {t.MCPToolCallResponse} result - The MCPToolCallResponse object
+ * @param {CallToolResult} result - The CallToolResult object from MCP SDK
  * @param {string} provider - The provider name (google, anthropic, openai)
  * @returns {t.FormattedContentResult} Tuple of content and image_urls
  */
 export function formatToolContent(
-  result: t.MCPToolCallResponse,
+  result: CallToolResult,
   provider: t.Provider,
 ): t.FormattedContentResult {
   if (!RECOGNIZED_PROVIDERS.has(provider)) {

@@ -24,17 +24,7 @@ describe('MCP Session Types', () => {
       expect(sessionInfo.terminated).toBe(true);
     });
 
-    it('should accept session info with optional terminatedAt', () => {
-      const terminatedAt = new Date();
-      const sessionInfo: t.MCPSessionInfo = {
-        sessionId: 'test-session-123',
-        createdAt: new Date(),
-        terminated: true,
-        terminatedAt,
-      };
 
-      expect(sessionInfo.terminatedAt).toBe(terminatedAt);
-    });
   });
 
   describe('SessionErrorType', () => {
@@ -43,8 +33,6 @@ describe('MCP Session Types', () => {
         'session_terminated',
         'session_expired',
         'session_invalid',
-        'session_conflict',
-        'session_timeout',
       ];
 
       // This test ensures all error types are properly typed
@@ -60,20 +48,17 @@ describe('MCP Session Types', () => {
         type: 'session_terminated',
         message: 'Session has been terminated',
         sessionId: 'test-session-123',
-        timestamp: new Date(),
       };
 
       expect(sessionError.type).toBe('session_terminated');
       expect(sessionError.message).toBe('Session has been terminated');
       expect(sessionError.sessionId).toBe('test-session-123');
-      expect(sessionError.timestamp).toBeInstanceOf(Date);
     });
 
     it('should accept session error without sessionId', () => {
       const sessionError: t.SessionError = {
         type: 'session_expired',
         message: 'Session has expired',
-        timestamp: new Date(),
       };
 
       expect(sessionError.sessionId).toBeUndefined();
@@ -84,35 +69,16 @@ describe('MCP Session Types', () => {
         'session_terminated',
         'session_expired',
         'session_invalid',
-        'session_conflict',
-        'session_timeout',
       ];
 
       errorTypes.forEach(type => {
         const sessionError: t.SessionError = {
           type,
           message: `Test error for ${type}`,
-          timestamp: new Date(),
         };
 
         expect(sessionError.type).toBe(type);
       });
-    });
-
-    it('should accept session error with additional context', () => {
-      const sessionError: t.SessionError = {
-        type: 'session_conflict',
-        message: 'Session conflict detected',
-        sessionId: 'test-session-123',
-        timestamp: new Date(),
-        context: {
-          conflictingSessionId: 'other-session-456',
-          reason: 'duplicate_connection',
-        },
-      };
-
-      expect(sessionError.context).toBeDefined();
-      expect(sessionError.context?.conflictingSessionId).toBe('other-session-456');
     });
   });
 
@@ -214,23 +180,21 @@ describe('MCP Session Types', () => {
   describe('Optional Properties', () => {
     it('should handle optional sessionId in SessionError', () => {
       const errorWithoutSessionId: t.SessionError = {
-        type: 'session_timeout',
-        message: 'Session timed out',
-        timestamp: new Date(),
+        type: 'session_expired',
+        message: 'Session expired',
       };
 
       const errorWithSessionId: t.SessionError = {
-        type: 'session_timeout',
-        message: 'Session timed out',
+        type: 'session_expired',
+        message: 'Session expired',
         sessionId: 'test-session-123',
-        timestamp: new Date(),
       };
 
       expect(errorWithoutSessionId.sessionId).toBeUndefined();
       expect(errorWithSessionId.sessionId).toBe('test-session-123');
     });
 
-    it('should handle optional terminatedAt in MCPSessionInfo', () => {
+    it('should handle terminated property in MCPSessionInfo', () => {
       const activeSession: t.MCPSessionInfo = {
         sessionId: 'active-session',
         createdAt: new Date(),
@@ -241,11 +205,10 @@ describe('MCP Session Types', () => {
         sessionId: 'terminated-session',
         createdAt: new Date(),
         terminated: true,
-        terminatedAt: new Date(),
       };
 
-      expect(activeSession.terminatedAt).toBeUndefined();
-      expect(terminatedSession.terminatedAt).toBeInstanceOf(Date);
+      expect(activeSession.terminated).toBe(false);
+      expect(terminatedSession.terminated).toBe(true);
     });
   });
 });

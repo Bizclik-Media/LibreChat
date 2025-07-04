@@ -4,8 +4,8 @@
 services:
   api:
     build:
-      dockerfile: Dockerfile.multi
-      target: api-build
+      dockerfile: Dockerfile
+      # target: api-build
     container_name: LibreChat
     ports:
       - 3080:3080
@@ -17,8 +17,8 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       - HOST=0.0.0.0
-      - DOMAIN_SERVER=http://localhost:3080
-      - DOMAIN_CLIENT=http://localhost:3080
+      - DOMAIN_SERVER=http://0.0.0.0:3080
+      - DOMAIN_CLIENT=http://0.0.0.0:3080
       - MONGO_URI=mongodb://mongodb:27017/LibreChat
     volumes:
       - type: bind

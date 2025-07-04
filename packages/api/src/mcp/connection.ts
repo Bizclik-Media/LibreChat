@@ -119,27 +119,30 @@ export class MCPConnection extends EventEmitter {
   }
 
   /** Set session information */
-  private setSession(sessionInfo: t.MCPSessionInfo): void {
+  public setSession(sessionInfo: t.MCPSessionInfo): void {
     this.sessionInfo = sessionInfo;
     this.sessionTerminated = false;
     logger.debug(`${this.getLogPrefix()} Session set: ${sessionInfo.sessionId.substring(0, 8)}...`);
+    this.emit('sessionCreated', sessionInfo);
   }
 
   /** Clear session state */
-  private clearSession(): void {
+  public clearSession(): void {
     if (this.sessionInfo) {
       logger.debug(`${this.getLogPrefix()} Session cleared`);
       this.sessionInfo = null;
       this.sessionTerminated = false;
+      this.emit('sessionCleared');
     }
   }
 
   /** Mark session as terminated */
-  private markSessionTerminated(): void {
+  public markSessionTerminated(): void {
     if (this.sessionInfo) {
       this.sessionInfo.terminated = true;
       this.sessionTerminated = true;
       logger.info(`${this.getLogPrefix()} Session marked as terminated`);
+      this.emit('sessionTerminated', this.sessionInfo);
     }
   }
 
@@ -762,7 +765,6 @@ export class MCPConnection extends EventEmitter {
         type: 'session_terminated',
         message: 'Session has been terminated by the server',
         sessionId: this.sessionInfo?.sessionId,
-        timestamp: new Date(),
       };
     }
 
@@ -773,7 +775,6 @@ export class MCPConnection extends EventEmitter {
         type: 'session_invalid',
         message: 'Session ID is invalid or malformed',
         sessionId: this.sessionInfo?.sessionId,
-        timestamp: new Date(),
       };
     }
 
@@ -784,7 +785,6 @@ export class MCPConnection extends EventEmitter {
         type: 'session_expired',
         message: 'Session has expired',
         sessionId: this.sessionInfo?.sessionId,
-        timestamp: new Date(),
       };
     }
 

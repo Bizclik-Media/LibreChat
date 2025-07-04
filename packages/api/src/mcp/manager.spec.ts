@@ -136,7 +136,7 @@ describe('MCPManager Session Management', () => {
   describe('Session Event Handling', () => {
     it('should set up session event handlers for system connections', () => {
       const mockOn = jest.fn();
-      mockConnection.on = mockOn;
+      mockConnection.on = mockOn as any;
 
       (manager as any).setupSessionEventHandlers(mockConnection, 'test-server', 'SYSTEM_USER_ID');
 
@@ -148,7 +148,7 @@ describe('MCPManager Session Management', () => {
 
     it('should set up session event handlers for user connections', () => {
       const mockOn = jest.fn();
-      mockConnection.on = mockOn;
+      mockConnection.on = mockOn as any;
 
       (manager as any).setupSessionEventHandlers(mockConnection, 'test-server', 'user-123');
 
@@ -170,7 +170,7 @@ describe('MCPManager Session Management', () => {
           handler(sessionInfo);
         }
       });
-      mockConnection.on = mockOn;
+      mockConnection.on = mockOn as any;
 
       const trackSessionSpy = jest.spyOn(manager as any, 'trackSession');
 
@@ -191,7 +191,7 @@ describe('MCPManager Session Management', () => {
           handler(sessionInfo);
         }
       });
-      mockConnection.on = mockOn;
+      mockConnection.on = mockOn as any;
 
       const trackSessionSpy = jest.spyOn(manager as any, 'trackSession');
 
@@ -206,7 +206,7 @@ describe('MCPManager Session Management', () => {
           handler();
         }
       });
-      mockConnection.on = mockOn;
+      mockConnection.on = mockOn as any;
 
       const trackSessionSpy = jest.spyOn(manager as any, 'trackSession');
 
@@ -220,7 +220,6 @@ describe('MCPManager Session Management', () => {
         type: 'session_terminated',
         message: 'Session terminated',
         sessionId: 'test-session-123',
-        timestamp: new Date(),
       };
 
       const mockOn = jest.fn((event, handler) => {
@@ -228,7 +227,7 @@ describe('MCPManager Session Management', () => {
           handler(sessionError);
         }
       });
-      mockConnection.on = mockOn;
+      mockConnection.on = mockOn as any;
 
       const loggerWarnSpy = jest.spyOn(logger, 'warn').mockImplementation();
 
