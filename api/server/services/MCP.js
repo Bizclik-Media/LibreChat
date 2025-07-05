@@ -148,6 +148,10 @@ async function createMCPTool({ req, res, toolKey, provider: _provider }) {
       const provider = (config?.metadata?.provider || _provider)?.toLowerCase();
 
       const { args: _args, stepId, ...toolCall } = config.toolCall ?? {};
+
+      // DEBUG: Log config object where we try to access thread_id
+      logger.debug(`[MCP][${serverName}][${toolName}] Config object:`, JSON.stringify(config, null, 2));
+
       const loginFlowId = `${serverName}:oauth_login:${config.metadata.thread_id}:${config.metadata.run_id}`;
       const oauthStart = createOAuthStart({
         res,
@@ -181,6 +185,7 @@ async function createMCPTool({ req, res, toolKey, provider: _provider }) {
         },
         user: config?.configurable?.user,
         customUserVars,
+        threadId: config?.metadata?.thread_id,
         flowManager,
         tokenMethods: {
           findToken,

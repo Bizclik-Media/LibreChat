@@ -26,6 +26,20 @@ const ALLOWED_USER_FIELDS = [
 ] as const;
 
 /**
+ * Processes a string value to replace thread ID placeholders
+ * @param value - The string value to process
+ * @param threadId - The thread ID to replace placeholders with
+ * @returns The processed string with thread ID placeholders replaced
+ */
+function processThreadPlaceholders(value: string, threadId?: string): string {
+  if (!threadId || typeof value !== 'string') {
+    return value;
+  }
+
+  return value.replace(/\{\{LIBRECHAT_USER_THREAD_ID\}\}/g, threadId);
+}
+
+/**
  * Processes a string value to replace user field placeholders
  * @param value - The string value to process
  * @param user - The user object
@@ -66,16 +80,19 @@ function processUserPlaceholders(value: string, user?: TUser): string {
  * @param originalValue - The original string value to process
  * @param customUserVars - Optional custom user variables to replace placeholders
  * @param user - Optional user object for replacing user field placeholders
+ * @param threadId - Optional thread ID for replacing thread placeholders
  * @returns The processed string with all placeholders replaced
  */
 function processSingleValue({
   originalValue,
   customUserVars,
   user,
+  threadId,
 }: {
   originalValue: string;
   customUserVars?: Record<string, string>;
   user?: TUser;
+  threadId?: string;
 }): string {
   let value = originalValue;
 
@@ -92,7 +109,10 @@ function processSingleValue({
   // 2. Replace user field placeholders (e.g., {{LIBRECHAT_USER_EMAIL}}, {{LIBRECHAT_USER_ID}})
   value = processUserPlaceholders(value, user);
 
-  // 3. Replace system environment variables
+  // 3. Replace thread ID placeholders (e.g., {{LIBRECHAT_USER_THREAD_ID}})
+  value = processThreadPlaceholders(value, threadId);
+
+  // 4. Replace system environment variables
   value = extractEnvVariable(value);
 
   return value;
@@ -103,12 +123,14 @@ function processSingleValue({
  * @param obj - The object to process
  * @param user - The user object containing all user fields
  * @param customUserVars - vars that user set in settings
+ * @param threadId - Optional thread ID for replacing thread placeholders
  * @returns - The processed object with environment variables replaced
  */
 export function processMCPEnv(
   obj: Readonly<MCPOptions>,
   user?: TUser,
   customUserVars?: Record<string, string>,
+  threadId?: string,
 ): MCPOptions {
   if (obj === null || obj === undefined) {
     return obj;
@@ -119,7 +141,12 @@ export function processMCPEnv(
   if ('env' in newObj && newObj.env) {
     const processedEnv: Record<string, string> = {};
     for (const [key, originalValue] of Object.entries(newObj.env)) {
-      processedEnv[key] = processSingleValue({ originalValue, customUserVars, user });
+      processedEnv[key] = processSingleValue({
+        originalValue: originalValue as string,
+        customUserVars,
+        user,
+        threadId
+      });
     }
     newObj.env = processedEnv;
   }
@@ -129,14 +156,24 @@ export function processMCPEnv(
   if ('headers' in newObj && newObj.headers) {
     const processedHeaders: Record<string, string> = {};
     for (const [key, originalValue] of Object.entries(newObj.headers)) {
-      processedHeaders[key] = processSingleValue({ originalValue, customUserVars, user });
+      processedHeaders[key] = processSingleValue({
+        originalValue: originalValue as string,
+        customUserVars,
+        user,
+        threadId
+      });
     }
     newObj.headers = processedHeaders;
   }
 
   // Process URL if it exists (for WebSocket, SSE, StreamableHTTP types)
   if ('url' in newObj && newObj.url) {
-    newObj.url = processSingleValue({ originalValue: newObj.url, customUserVars, user });
+    newObj.url = processSingleValue({
+      originalValue: newObj.url,
+      customUserVars,
+      user,
+      threadId
+    });
   }
 
   return newObj;
@@ -147,12 +184,14 @@ export function processMCPEnv(
  * @param headers - The headers object to process
  * @param user - Optional user object for replacing user field placeholders (can be partial with just id)
  * @param customUserVars - Optional custom user variables to replace placeholders
+ * @param threadId - Optional thread ID for replacing thread placeholders
  * @returns - The processed headers with all placeholders replaced
  */
 export function resolveHeaders(
   headers: Record<string, string> | undefined,
   user?: Partial<TUser> | { id: string },
   customUserVars?: Record<string, string>,
+  threadId?: string,
 ) {
   const resolvedHeaders = { ...(headers ?? {}) };
 
@@ -162,6 +201,7 @@ export function resolveHeaders(
         originalValue: headers[key],
         customUserVars,
         user: user as TUser,
+        threadId,
       });
     });
   }

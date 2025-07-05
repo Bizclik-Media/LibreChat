@@ -379,6 +379,7 @@ export class MCPManager {
     oauthStart,
     oauthEnd,
     signal,
+    threadId,
   }: {
     user: TUser;
     serverName: string;
@@ -388,6 +389,7 @@ export class MCPManager {
     oauthStart?: (authURL: string) => Promise<void>;
     oauthEnd?: () => Promise<void>;
     signal?: AbortSignal;
+    threadId?: string;
   }): Promise<MCPConnection> {
     const userId = user.id;
     if (!userId) {
@@ -437,7 +439,7 @@ export class MCPManager {
       );
     }
 
-    config = { ...(processMCPEnv(config, user, customUserVars) ?? {}) };
+    config = { ...(processMCPEnv(config, user, customUserVars, threadId) ?? {}) };
     /** If no in-memory tokens, tokens from persistent storage */
     let tokens: MCPOAuthTokens | null = null;
     if (tokenMethods?.findToken) {
@@ -823,6 +825,7 @@ export class MCPManager {
     oauthStart,
     oauthEnd,
     customUserVars,
+    threadId,
   }: {
     user?: TUser;
     serverName: string;
@@ -832,6 +835,7 @@ export class MCPManager {
     options?: RequestOptions;
     tokenMethods?: TokenMethods;
     customUserVars?: Record<string, string>;
+    threadId?: string;
     flowManager: FlowStateManager<MCPOAuthTokens | null>;
     oauthStart?: (authURL: string) => Promise<void>;
     oauthEnd?: () => Promise<void>;
@@ -854,6 +858,7 @@ export class MCPManager {
           oauthEnd,
           signal: options?.signal,
           customUserVars,
+          threadId,
         });
       } else {
         /** App-level connection */
