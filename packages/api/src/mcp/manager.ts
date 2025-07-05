@@ -417,15 +417,22 @@ export class MCPManager {
       if (await connection.isConnected()) {
         const existingThreadId = (connection as any).threadId;
 
-        // Update the thread ID for this connection if it has changed
+        // Check if thread ID has changed - if so, need to recreate connection with new headers
         if (threadId && existingThreadId && threadId !== existingThreadId) {
-          logger.info(`[MCP][User: ${userId}][${serverName}] Thread ID changed (existing: ${existingThreadId}, requested: ${threadId}). Updating connection thread ID.`);
-          (connection as any).threadId = threadId;
+          logger.info(`[MCP][User: ${userId}][${serverName}] Thread ID changed (existing: ${existingThreadId}, requested: ${threadId}). Recreating connection for new headers.`);
+          // Disconnect the old connection since headers are baked into transport
+          try {
+            await connection.disconnect();
+          } catch (err) {
+            logger.warn(`[MCP][User: ${userId}][${serverName}] Error disconnecting old connection:`, err);
+          }
+          this.removeUserConnection(userId, serverName);
+          connection = undefined; // Force creation of new connection with correct thread ID
+        } else {
+          logger.info(`[MCP][User: ${userId}][${serverName}] Reusing active connection (threadId: ${threadId || existingThreadId})`);
+          this.updateUserLastActivity(userId);
+          return connection;
         }
-
-        logger.info(`[MCP][User: ${userId}][${serverName}] Reusing active connection (threadId: ${threadId})`);
-        this.updateUserLastActivity(userId);
-        return connection;
       } else {
         // Connection exists but is not connected, attempt to remove potentially stale entry
         logger.warn(
