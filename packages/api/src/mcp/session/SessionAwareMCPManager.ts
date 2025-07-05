@@ -120,56 +120,101 @@ export class SessionAwareMCPManager extends MCPManager {
 
   /** Override initializeMCP to use session-aware connections */
   public async initializeMCP(params: any): Promise<void> {
-    // Store reference to the original MCPConnection import
-    const connectionModule = require('../connection');
-    const originalMCPConnection = connectionModule.MCPConnection;
+    // Call the parent method first to create all connections normally
+    await super.initializeMCP(params);
 
-    try {
-      // Temporarily replace MCPConnection with SessionAwareMCPConnection
-      connectionModule.MCPConnection = SessionAwareMCPConnection;
+    // Now replace all created connections with session-aware versions
+    const connections = (this as any).connections as Map<string, any>;
+    const newConnections = new Map();
 
-      // Call the parent method which will now use SessionAwareMCPConnection
-      await super.initializeMCP(params);
+    for (const [serverName, connection] of connections.entries()) {
+      // Create a new session-aware connection with the same parameters
+      const sessionAwareConnection = new SessionAwareMCPConnection(
+        (connection as any).serverName,
+        (connection as any).options,
+        undefined, // system-level connections don't have userId
+        (connection as any).oauthTokens
+      );
 
-      // Set up session handlers for all created connections
-      for (const [serverName, connection] of (this as any).connections.entries()) {
-        if (connection instanceof SessionAwareMCPConnection) {
-          this.setupSessionEventHandlers(connection, serverName, CONSTANTS.SYSTEM_USER_ID);
+      // Copy the connection state if it was connected
+      try {
+        const isConnected = await connection.isConnected();
+        if (isConnected) {
+          await sessionAwareConnection.connect();
         }
+      } catch (error) {
+        logger.warn(`Failed to connect session-aware replacement for ${serverName}:`, error);
       }
-    } finally {
-      // Always restore the original constructor
-      connectionModule.MCPConnection = originalMCPConnection;
+
+      // Set up session handlers
+      this.setupSessionEventHandlers(sessionAwareConnection, serverName, CONSTANTS.SYSTEM_USER_ID);
+
+      // Disconnect the old connection
+      try {
+        await connection.disconnect();
+      } catch (error) {
+        logger.debug(`Error disconnecting original connection for ${serverName}:`, error);
+      }
+
+      newConnections.set(serverName, sessionAwareConnection);
     }
+
+    // Replace the connections map
+    (this as any).connections = newConnections;
   }
 
   /** Override getUserConnection to use session-aware connections */
   public async getUserConnection(params: any): Promise<any> {
-    // Store reference to the original MCPConnection import
-    const connectionModule = require('../connection');
-    const originalMCPConnection = connectionModule.MCPConnection;
+    // Call the parent method first to get or create the connection
+    const connection = await super.getUserConnection(params);
 
-    try {
-      // Temporarily replace MCPConnection with SessionAwareMCPConnection
-      connectionModule.MCPConnection = SessionAwareMCPConnection;
+    // If it's not already a session-aware connection, replace it
+    if (!(connection instanceof SessionAwareMCPConnection)) {
+      // Create a new session-aware connection with the same parameters
+      const sessionAwareConnection = new SessionAwareMCPConnection(
+        (connection as any).serverName,
+        (connection as any).options,
+        params.user?.id,
+        (connection as any).oauthTokens
+      );
 
-      // Call the parent method which will now use SessionAwareMCPConnection
-      const connection = await super.getUserConnection(params);
-
-      // Set up session handlers for the new connection
-      if (connection instanceof SessionAwareMCPConnection) {
-        this.setupSessionEventHandlers(
-          connection,
-          (connection as any).serverName,
-          params.user?.id || CONSTANTS.SYSTEM_USER_ID
-        );
+      // Copy the connection state if it was connected
+      try {
+        const isConnected = await connection.isConnected();
+        if (isConnected) {
+          await sessionAwareConnection.connect();
+        }
+      } catch (error) {
+        logger.warn(`Failed to connect session-aware replacement for user connection:`, error);
       }
 
-      return connection;
-    } finally {
-      // Always restore the original constructor
-      connectionModule.MCPConnection = originalMCPConnection;
+      // Set up session handlers
+      this.setupSessionEventHandlers(
+        sessionAwareConnection,
+        (connection as any).serverName,
+        params.user?.id || CONSTANTS.SYSTEM_USER_ID
+      );
+
+      // Replace in the user connections map
+      const userId = params.user?.id;
+      if (userId) {
+        const userConnections = (this as any).userConnections.get(userId);
+        if (userConnections) {
+          userConnections.set((connection as any).serverName, sessionAwareConnection);
+        }
+      }
+
+      // Disconnect the old connection
+      try {
+        await connection.disconnect();
+      } catch (error) {
+        logger.debug(`Error disconnecting original user connection:`, error);
+      }
+
+      return sessionAwareConnection;
     }
+
+    return connection;
   }
 
   /** Override to ensure session tracking is cleared when connections are removed */
