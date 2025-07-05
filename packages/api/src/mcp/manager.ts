@@ -396,6 +396,8 @@ export class MCPManager {
       throw new McpError(ErrorCode.InvalidRequest, `[MCP] User object missing id property`);
     }
 
+    logger.info(`[MCP][User: ${userId}][${serverName}] getUserConnection called with threadId: ${threadId}`);
+
     const userServerMap = this.userConnections.get(userId);
     let connection = userServerMap?.get(serverName);
     const now = Date.now();
@@ -413,7 +415,7 @@ export class MCPManager {
       connection = undefined; // Force creation of a new connection
     } else if (connection) {
       if (await connection.isConnected()) {
-        logger.debug(`[MCP][User: ${userId}][${serverName}] Reusing active connection`);
+        logger.info(`[MCP][User: ${userId}][${serverName}] Reusing active connection (existing threadId: ${(connection as any).threadId}, requested threadId: ${threadId})`);
         this.updateUserLastActivity(userId);
         return connection;
       } else {
@@ -496,6 +498,7 @@ export class MCPManager {
       logger.info(`[MCP][User: ${userId}][${serverName}] Loaded OAuth tokens`);
     }
 
+    logger.info(`[MCP][User: ${userId}][${serverName}] Creating new MCPConnection with threadId: ${threadId}`);
     connection = new MCPConnection(serverName, config, userId, tokens, threadId);
 
     connection.on('oauthRequired', async (data) => {
@@ -844,6 +847,8 @@ export class MCPManager {
     let connection: MCPConnection | undefined;
     const userId = user?.id;
     const logPrefix = userId ? `[MCP][User: ${userId}][${serverName}]` : `[MCP][${serverName}]`;
+
+    logger.info(`${logPrefix}[${toolName}] MCPManager.callTool called with threadId: ${threadId}`);
 
     try {
       if (userId && user) {

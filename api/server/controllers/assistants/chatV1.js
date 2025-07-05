@@ -424,7 +424,9 @@ const chatV1 = async (req, res) => {
         userMessage.file_ids = file_ids;
       }
 
+      logger.info(`[chatV1] Calling initThread with thread_id: ${thread_id} (conversationId: ${conversationId})`);
       const result = await initThread({ openai, body: initThreadBody, thread_id });
+      logger.info(`[chatV1] initThread returned thread_id: ${result.thread_id} (was: ${thread_id})`);
       thread_id = result.thread_id;
 
       createOnTextProgress({

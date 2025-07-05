@@ -156,25 +156,39 @@ export default function useChatFunctions({
       currentMessages = [];
       conversationId = null;
       thread_id = null; // Ensure new conversations get a new thread
+      console.log('[useChatFunctions] NEW CONVERSATION - thread_id set to null');
       navigate('/c/new', { state: { focusChat: true } });
     } else {
       // Only try to find existing thread_id for continuing conversations
-    const targetParentMessageId = isRegenerate ? messageId : latestMessage?.parentMessageId;
-    /**
-     * If the user regenerated or resubmitted the message, the current parent is technically
-     * the latest user message, which is passed into `ask`; otherwise, we can rely on the
-     * latestMessage to find the parent.
-     */
+      const targetParentMessageId = isRegenerate ? messageId : latestMessage?.parentMessageId;
+      /**
+       * If the user regenerated or resubmitted the message, the current parent is technically
+       * the latest user message, which is passed into `ask`; otherwise, we can rely on the
+       * latestMessage to find the parent.
+       */
       targetParentMessage = currentMessages.find(
-      (msg) => msg.messageId === targetParentMessageId,
-    );
+        (msg) => msg.messageId === targetParentMessageId,
+      );
 
+      console.log('[useChatFunctions] Thread ID resolution:', {
+        targetParentMessage_thread_id: targetParentMessage?.thread_id,
+        latestMessage_thread_id: latestMessage?.thread_id,
+        conversationId,
+        isNewConvo: conversationId === null
+      });
 
       thread_id = targetParentMessage?.thread_id ?? latestMessage?.thread_id;
 
-    if (thread_id == null) {
+      if (thread_id == null) {
         const fallbackMessage = currentMessages.find((message) => message.thread_id);
+        console.log('[useChatFunctions] No thread_id found, checking fallback:', {
+          fallbackMessage_thread_id: fallbackMessage?.thread_id,
+          currentMessages_length: currentMessages.length
+        });
         thread_id = fallbackMessage?.thread_id;
+      }
+
+      console.log('[useChatFunctions] Final thread_id for continuing conversation:', thread_id);
     }
 
     const endpointsConfig = queryClient.getQueryData<TEndpointsConfig>([QueryKeys.endpoints]);
@@ -337,6 +351,13 @@ export default function useChatFunctions({
     if (index === 0 && setLatestMessage) {
       setLatestMessage(initialResponse);
     }
+
+    console.log('[useChatFunctions] FINAL SUBMISSION - thread_id being sent to server:', {
+      thread_id: endpointOption.thread_id,
+      conversationId: submission.conversation.conversationId,
+      endpoint: submission.conversation.endpoint,
+      isNewConvo: submission.conversation.conversationId === null
+    });
 
     setSubmission(submission);
     logger.dir('message_stream', submission, { depth: null });

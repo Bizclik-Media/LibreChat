@@ -26,14 +26,19 @@ const { saveConvo } = require('~/models/Conversation');
 async function initThread({ openai, body, thread_id: _thread_id }) {
   let thread = {};
   const messages = [];
+
   if (_thread_id) {
+    logger.info(`[initThread] Using existing thread_id: ${_thread_id}`);
     const message = await openai.beta.threads.messages.create(_thread_id, body.messages[0]);
     messages.push(message);
   } else {
+    logger.info(`[initThread] Creating NEW thread (no thread_id provided)`);
     thread = await openai.beta.threads.create(body);
+    logger.info(`[initThread] NEW thread created with thread_id: ${thread.id}`);
   }
 
   const thread_id = _thread_id || thread.id;
+  logger.info(`[initThread] Final thread_id: ${thread_id}`);
   return { messages, thread_id, ...thread };
 }
 

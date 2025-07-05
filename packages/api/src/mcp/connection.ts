@@ -92,6 +92,9 @@ export class MCPConnection extends EventEmitter {
     if (oauthTokens) {
       this.oauthTokens = oauthTokens;
     }
+
+    const userPart = this.userId ? `[User: ${this.userId}]` : '';
+    logger.info(`[MCP]${userPart}[${this.serverName}] MCPConnection created with threadId: ${this.threadId}`);
     this.client = new Client(
       {
         name: '@librechat/api-client',
@@ -194,6 +197,9 @@ export class MCPConnection extends EventEmitter {
           // Add thread ID header if available
           if (this.threadId) {
             headers['X-Thread-Id'] = this.threadId;
+            logger.info(`${this.getLogPrefix()} Adding X-Thread-Id header: ${this.threadId} for SSE transport`);
+          } else {
+            logger.info(`${this.getLogPrefix()} No threadId available for SSE transport`);
           }
 
           const transport = new SSEClientTransport(url, {
@@ -250,6 +256,9 @@ export class MCPConnection extends EventEmitter {
           // Add thread ID header if available
           if (this.threadId) {
             headers['X-Thread-Id'] = this.threadId;
+            logger.info(`${this.getLogPrefix()} Adding X-Thread-Id header: ${this.threadId} for StreamableHTTP transport`);
+          } else {
+            logger.info(`${this.getLogPrefix()} No threadId available for StreamableHTTP transport`);
           }
 
           const transport = new StreamableHTTPClientTransport(url, {
