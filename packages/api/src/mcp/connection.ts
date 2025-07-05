@@ -81,6 +81,7 @@ export class MCPConnection extends EventEmitter {
     private readonly options: t.MCPOptions,
     userId?: string,
     oauthTokens?: MCPOAuthTokens | null,
+    private readonly threadId?: string,
   ) {
     super();
     this.serverName = serverName;
@@ -190,6 +191,11 @@ export class MCPConnection extends EventEmitter {
             headers['Authorization'] = `Bearer ${this.oauthTokens.access_token}`;
           }
 
+          // Add thread ID header if available
+          if (this.threadId) {
+            headers['X-Thread-Id'] = this.threadId;
+          }
+
           const transport = new SSEClientTransport(url, {
             requestInit: {
               headers,
@@ -239,6 +245,11 @@ export class MCPConnection extends EventEmitter {
           const headers = { ...options.headers };
           if (this.oauthTokens?.access_token) {
             headers['Authorization'] = `Bearer ${this.oauthTokens.access_token}`;
+          }
+
+          // Add thread ID header if available
+          if (this.threadId) {
+            headers['X-Thread-Id'] = this.threadId;
           }
 
           const transport = new StreamableHTTPClientTransport(url, {

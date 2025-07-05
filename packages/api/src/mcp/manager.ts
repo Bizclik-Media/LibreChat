@@ -379,6 +379,7 @@ export class MCPManager {
     oauthStart,
     oauthEnd,
     signal,
+    threadId,
   }: {
     user: TUser;
     serverName: string;
@@ -388,6 +389,7 @@ export class MCPManager {
     oauthStart?: (authURL: string) => Promise<void>;
     oauthEnd?: () => Promise<void>;
     signal?: AbortSignal;
+    threadId?: string;
   }): Promise<MCPConnection> {
     const userId = user.id;
     if (!userId) {
@@ -494,7 +496,7 @@ export class MCPManager {
       logger.info(`[MCP][User: ${userId}][${serverName}] Loaded OAuth tokens`);
     }
 
-    connection = new MCPConnection(serverName, config, userId, tokens);
+    connection = new MCPConnection(serverName, config, userId, tokens, threadId);
 
     connection.on('oauthRequired', async (data) => {
       logger.info(`[MCP][User: ${userId}][${serverName}] oauthRequired event received`);
@@ -823,6 +825,7 @@ export class MCPManager {
     oauthStart,
     oauthEnd,
     customUserVars,
+    threadId,
   }: {
     user?: TUser;
     serverName: string;
@@ -835,6 +838,7 @@ export class MCPManager {
     flowManager: FlowStateManager<MCPOAuthTokens | null>;
     oauthStart?: (authURL: string) => Promise<void>;
     oauthEnd?: () => Promise<void>;
+    threadId?: string;
   }): Promise<t.FormattedToolResponse> {
     /** User-specific connection */
     let connection: MCPConnection | undefined;
@@ -854,6 +858,7 @@ export class MCPManager {
           oauthEnd,
           signal: options?.signal,
           customUserVars,
+          threadId,
         });
       } else {
         /** App-level connection */

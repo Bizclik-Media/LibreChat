@@ -189,6 +189,7 @@ async function createMCPTool({ req, res, toolKey, provider: _provider }) {
         },
         oauthStart,
         oauthEnd,
+        threadId: config?.metadata?.thread_id,
       });
 
       if (isAssistantsEndpoint(provider) && Array.isArray(result)) {
