@@ -419,6 +419,7 @@ export class MCPManager {
 
         // Check if thread ID has changed - if so, create a new connection
         if (threadId && existingThreadId && threadId !== existingThreadId) {
+          logger.info(`[MCP][User: ${userId}][${serverName}] Thread ID changed (existing: ${existingThreadId}, requested: ${threadId}). Creating new connection.`);
           // Disconnect the old connection
           try {
             await connection.disconnect();
@@ -428,8 +429,9 @@ export class MCPManager {
           this.removeUserConnection(userId, serverName);
           connection = undefined; // Force creation of new connection
         } else {
-        this.updateUserLastActivity(userId);
-        return connection;
+          logger.info(`[MCP][User: ${userId}][${serverName}] Reusing active connection (existing threadId: ${existingThreadId}, requested threadId: ${threadId})`);
+          this.updateUserLastActivity(userId);
+          return connection;
         }
       } else {
         // Connection exists but is not connected, attempt to remove potentially stale entry
