@@ -19,11 +19,16 @@ export class MCPManager {
   private static instance: MCPManager | null = null;
   /** App-level connections initialized at startup */
   private connections: Map<string, MCPConnection> = new Map();
-  /** User-specific connections initialized on demand */
-  private userConnections: Map<string, Map<string, MCPConnection>> = new Map();
-  /** Last activity timestamp for users (not per server) */
+  /** Thread-specific connections initialized on demand */
+  private threadConnections: Map<string, Map<string, MCPConnection>> = new Map();
+  /** Last activity timestamp for threads */
+  private threadLastActivity: Map<string, number> = new Map();
+  /** Mapping of users to their active threads for cleanup purposes */
+  private userThreadMapping: Map<string, Set<string>> = new Map();
+  /** Last activity timestamp for users (for user-level cleanup) */
   private userLastActivity: Map<string, number> = new Map();
-  private readonly USER_CONNECTION_IDLE_TIMEOUT = 15 * 60 * 1000; // 15 minutes (TODO: make configurable)
+  private readonly THREAD_CONNECTION_IDLE_TIMEOUT = 60 * 60 * 1000; // 60 minutes
+  private readonly USER_CONNECTION_IDLE_TIMEOUT = 15 * 60 * 1000; // 15 minutes (for user-level cleanup)
   private mcpConfigs: t.MCPServers = {};
   /** Store MCP server instructions */
   private serverInstructions: Map<string, string> = new Map();
@@ -343,21 +348,43 @@ export class MCPManager {
   private checkIdleConnections(currentUserId?: string): void {
     const now = Date.now();
 
-    // Iterate through all users to check for idle ones
+    // Check for idle threads
+    for (const [threadId, lastActivity] of this.threadLastActivity.entries()) {
+      if (now - lastActivity > this.THREAD_CONNECTION_IDLE_TIMEOUT) {
+        logger.info(
+          `[MCP][Thread: ${threadId}] Thread idle for too long. Disconnecting all connections...`,
+        );
+        // Disconnect all thread connections asynchronously (fire and forget)
+        this.disconnectThreadConnections(threadId).catch((err) =>
+          logger.error(`[MCP][Thread: ${threadId}] Error disconnecting idle connections:`, err),
+        );
+      }
+    }
+
+    // Check for idle users (for user-level cleanup)
     for (const [userId, lastActivity] of this.userLastActivity.entries()) {
       if (currentUserId && currentUserId === userId) {
         continue;
       }
       if (now - lastActivity > this.USER_CONNECTION_IDLE_TIMEOUT) {
         logger.info(
-          `[MCP][User: ${userId}] User idle for too long. Disconnecting all connections...`,
+          `[MCP][User: ${userId}] User idle for too long. Disconnecting all user threads...`,
         );
-        // Disconnect all user connections asynchronously (fire and forget)
-        this.disconnectUserConnections(userId).catch((err) =>
-          logger.error(`[MCP][User: ${userId}] Error disconnecting idle connections:`, err),
+        // Disconnect all user threads asynchronously (fire and forget)
+        this.disconnectUserThreads(userId).catch((err) =>
+          logger.error(`[MCP][User: ${userId}] Error disconnecting idle user threads:`, err),
         );
       }
     }
+  }
+
+  /** Updates the last activity timestamp for a thread */
+  private updateThreadLastActivity(threadId: string): void {
+    const now = Date.now();
+    this.threadLastActivity.set(threadId, now);
+    logger.debug(
+      `[MCP][Thread: ${threadId}] Updated last activity timestamp: ${new Date(now).toISOString()}`,
+    );
   }
 
   /** Updates the last activity timestamp for a user */
@@ -369,9 +396,29 @@ export class MCPManager {
     );
   }
 
-  /** Gets or creates a connection for a specific user */
-  public async getUserConnection({
+  /** Adds a thread to user mapping for cleanup purposes */
+  private addUserThreadMapping(userId: string, threadId: string): void {
+    if (!this.userThreadMapping.has(userId)) {
+      this.userThreadMapping.set(userId, new Set());
+    }
+    this.userThreadMapping.get(userId)?.add(threadId);
+  }
+
+  /** Removes a thread from user mapping */
+  private removeUserThreadMapping(userId: string, threadId: string): void {
+    const userThreads = this.userThreadMapping.get(userId);
+    if (userThreads) {
+      userThreads.delete(threadId);
+      if (userThreads.size === 0) {
+        this.userThreadMapping.delete(userId);
+      }
+    }
+  }
+
+  /** Gets or creates a connection for a specific thread */
+  public async getThreadConnection({
     user,
+    threadId,
     serverName,
     flowManager,
     customUserVars,
@@ -379,9 +426,9 @@ export class MCPManager {
     oauthStart,
     oauthEnd,
     signal,
-    threadId,
   }: {
     user: TUser;
+    threadId: string;
     serverName: string;
     flowManager: FlowStateManager<MCPOAuthTokens | null>;
     customUserVars?: Record<string, string>;
@@ -389,63 +436,52 @@ export class MCPManager {
     oauthStart?: (authURL: string) => Promise<void>;
     oauthEnd?: () => Promise<void>;
     signal?: AbortSignal;
-    threadId?: string;
   }): Promise<MCPConnection> {
     const userId = user.id;
     if (!userId) {
       throw new McpError(ErrorCode.InvalidRequest, `[MCP] User object missing id property`);
     }
 
-    logger.info(`[MCP][User: ${userId}][${serverName}] getUserConnection called with threadId: ${threadId}`);
+    if (!threadId) {
+      throw new McpError(ErrorCode.InvalidRequest, `[MCP] Thread ID is required for thread-based connections`);
+    }
 
-    const userServerMap = this.userConnections.get(userId);
-    let connection = userServerMap?.get(serverName);
+    logger.info(`[MCP][User: ${userId}][Thread: ${threadId}][${serverName}] getThreadConnection called`);
+
+    const threadServerMap = this.threadConnections.get(threadId);
+    let connection = threadServerMap?.get(serverName);
     const now = Date.now();
 
-    // Check if user is idle
-    const lastActivity = this.userLastActivity.get(userId);
-    if (lastActivity && now - lastActivity > this.USER_CONNECTION_IDLE_TIMEOUT) {
-      logger.info(`[MCP][User: ${userId}] User idle for too long. Disconnecting all connections.`);
-      // Disconnect all user connections
+    // Check if thread is idle
+    const lastActivity = this.threadLastActivity.get(threadId);
+    if (lastActivity && now - lastActivity > this.THREAD_CONNECTION_IDLE_TIMEOUT) {
+      logger.info(`[MCP][Thread: ${threadId}] Thread idle for too long. Disconnecting all connections.`);
+      // Disconnect all thread connections
       try {
-        await this.disconnectUserConnections(userId);
+        await this.disconnectThreadConnections(threadId);
       } catch (err) {
-        logger.error(`[MCP][User: ${userId}] Error disconnecting idle connections:`, err);
+        logger.error(`[MCP][Thread: ${threadId}] Error disconnecting idle connections:`, err);
       }
       connection = undefined; // Force creation of a new connection
     } else if (connection) {
       if (await connection.isConnected()) {
-        const existingThreadId = (connection as any).threadId;
-
-        // Check if thread ID has changed - if so, need to recreate connection with new headers
-        if (threadId && existingThreadId && threadId !== existingThreadId) {
-          logger.info(`[MCP][User: ${userId}][${serverName}] Thread ID changed (existing: ${existingThreadId}, requested: ${threadId}). Recreating connection for new headers.`);
-          // Disconnect the old connection since headers are baked into transport
-          try {
-            await connection.disconnect();
-          } catch (err) {
-            logger.warn(`[MCP][User: ${userId}][${serverName}] Error disconnecting old connection:`, err);
-          }
-          this.removeUserConnection(userId, serverName);
-          connection = undefined; // Force creation of new connection with correct thread ID
-        } else {
-          logger.info(`[MCP][User: ${userId}][${serverName}] Reusing active connection (threadId: ${threadId || existingThreadId})`);
-          this.updateUserLastActivity(userId);
-          return connection;
-        }
+        logger.info(`[MCP][User: ${userId}][Thread: ${threadId}][${serverName}] Reusing active connection`);
+        this.updateThreadLastActivity(threadId);
+        this.updateUserLastActivity(userId);
+        return connection;
       } else {
         // Connection exists but is not connected, attempt to remove potentially stale entry
         logger.warn(
-          `[MCP][User: ${userId}][${serverName}] Found existing but disconnected connection object. Cleaning up.`,
+          `[MCP][User: ${userId}][Thread: ${threadId}][${serverName}] Found existing but disconnected connection object. Cleaning up.`,
         );
-        this.removeUserConnection(userId, serverName); // Clean up maps
+        this.removeThreadConnection(threadId, serverName); // Clean up maps
         connection = undefined;
       }
     }
 
     // If no valid connection exists, create a new one
     if (!connection) {
-      logger.info(`[MCP][User: ${userId}][${serverName}] Establishing new connection`);
+      logger.info(`[MCP][User: ${userId}][Thread: ${threadId}][${serverName}] Establishing new connection`);
     }
 
     let config = this.mcpConfigs[serverName];
@@ -577,13 +613,17 @@ export class MCPManager {
         throw new Error('Failed to establish connection after initialization attempt.');
       }
 
-      if (!this.userConnections.has(userId)) {
-        this.userConnections.set(userId, new Map());
+      if (!this.threadConnections.has(threadId)) {
+        this.threadConnections.set(threadId, new Map());
       }
-      this.userConnections.get(userId)?.set(serverName, connection);
+      this.threadConnections.get(threadId)?.set(serverName, connection);
 
-      logger.info(`[MCP][User: ${userId}][${serverName}] Connection successfully established`);
+      // Add thread to user mapping for cleanup purposes
+      this.addUserThreadMapping(userId, threadId);
+
+      logger.info(`[MCP][User: ${userId}][Thread: ${threadId}][${serverName}] Connection successfully established`);
       // Update timestamp on creation
+      this.updateThreadLastActivity(threadId);
       this.updateUserLastActivity(userId);
       return connection;
     } catch (error) {
@@ -596,60 +636,159 @@ export class MCPManager {
         );
       });
       // Ensure cleanup even if connection attempt fails
-      this.removeUserConnection(userId, serverName);
+      this.removeThreadConnection(threadId, serverName);
       throw error; // Re-throw the error to the caller
     }
   }
 
-  /** Removes a specific user connection entry */
-  private removeUserConnection(userId: string, serverName: string): void {
+  /** Gets or creates a connection for a specific user (backward compatibility wrapper) */
+  public async getUserConnection({
+    user,
+    serverName,
+    flowManager,
+    customUserVars,
+    tokenMethods,
+    oauthStart,
+    oauthEnd,
+    signal,
+    threadId,
+  }: {
+    user: TUser;
+    serverName: string;
+    flowManager: FlowStateManager<MCPOAuthTokens | null>;
+    customUserVars?: Record<string, string>;
+    tokenMethods?: TokenMethods;
+    oauthStart?: (authURL: string) => Promise<void>;
+    oauthEnd?: () => Promise<void>;
+    signal?: AbortSignal;
+    threadId?: string;
+  }): Promise<MCPConnection> {
+    if (threadId) {
+      // Use thread-based connection if threadId is provided
+      return this.getThreadConnection({
+        user,
+        threadId,
+        serverName,
+        flowManager,
+        customUserVars,
+        tokenMethods,
+        oauthStart,
+        oauthEnd,
+        signal,
+      });
+    } else {
+      // Fallback to app-level connection if no threadId
+      const connection = this.connections.get(serverName);
+      if (!connection) {
+        throw new McpError(
+          ErrorCode.InvalidRequest,
+          `[MCP] No app-level connection found for ${serverName}. Thread ID required for user-specific connections.`,
+        );
+      }
+      return connection;
+    }
+  }
+
+  /** Removes a specific thread connection entry */
+  private removeThreadConnection(threadId: string, serverName: string): void {
     // Remove connection object
-    const userMap = this.userConnections.get(userId);
-    if (userMap) {
-      userMap.delete(serverName);
-      if (userMap.size === 0) {
-        this.userConnections.delete(userId);
-        // Only remove user activity timestamp if all connections are gone
-        this.userLastActivity.delete(userId);
+    const threadMap = this.threadConnections.get(threadId);
+    if (threadMap) {
+      threadMap.delete(serverName);
+      if (threadMap.size === 0) {
+        this.threadConnections.delete(threadId);
+        // Remove thread activity timestamp if all connections are gone
+        this.threadLastActivity.delete(threadId);
+
+        // Remove thread from user mappings
+        for (const [userId, userThreads] of this.userThreadMapping.entries()) {
+          if (userThreads.has(threadId)) {
+            this.removeUserThreadMapping(userId, threadId);
+            break;
+          }
+        }
       }
     }
 
-    logger.debug(`[MCP][User: ${userId}][${serverName}] Removed connection entry.`);
+    logger.debug(`[MCP][Thread: ${threadId}][${serverName}] Removed connection entry.`);
   }
 
-  /** Disconnects and removes a specific user connection */
-  public async disconnectUserConnection(userId: string, serverName: string): Promise<void> {
-    const userMap = this.userConnections.get(userId);
-    const connection = userMap?.get(serverName);
+  /** Removes a specific user connection entry (legacy method for backward compatibility) */
+  private removeUserConnection(userId: string, serverName: string): void {
+    // This method is kept for backward compatibility but should not be used in new thread-based logic
+    logger.debug(`[MCP][User: ${userId}][${serverName}] Legacy removeUserConnection called - consider using thread-based methods.`);
+  }
+
+  /** Disconnects and removes a specific thread connection */
+  public async disconnectThreadConnection(threadId: string, serverName: string): Promise<void> {
+    const threadMap = this.threadConnections.get(threadId);
+    const connection = threadMap?.get(serverName);
     if (connection) {
-      logger.info(`[MCP][User: ${userId}][${serverName}] Disconnecting...`);
+      logger.info(`[MCP][Thread: ${threadId}][${serverName}] Disconnecting...`);
       await connection.disconnect();
-      this.removeUserConnection(userId, serverName);
+      this.removeThreadConnection(threadId, serverName);
     }
   }
 
-  /** Disconnects and removes all connections for a specific user */
-  public async disconnectUserConnections(userId: string): Promise<void> {
-    const userMap = this.userConnections.get(userId);
+  /** Disconnects and removes all connections for a specific thread */
+  public async disconnectThreadConnections(threadId: string): Promise<void> {
+    const threadMap = this.threadConnections.get(threadId);
     const disconnectPromises: Promise<void>[] = [];
-    if (userMap) {
-      logger.info(`[MCP][User: ${userId}] Disconnecting all servers...`);
-      const userServers = Array.from(userMap.keys());
-      for (const serverName of userServers) {
+    if (threadMap) {
+      logger.info(`[MCP][Thread: ${threadId}] Disconnecting all servers...`);
+      const threadServers = Array.from(threadMap.keys());
+      for (const serverName of threadServers) {
         disconnectPromises.push(
-          this.disconnectUserConnection(userId, serverName).catch((error) => {
+          this.disconnectThreadConnection(threadId, serverName).catch((error) => {
             logger.error(
-              `[MCP][User: ${userId}][${serverName}] Error during disconnection:`,
+              `[MCP][Thread: ${threadId}][${serverName}] Error during disconnection:`,
               error,
             );
           }),
         );
       }
       await Promise.allSettled(disconnectPromises);
-      // Ensure user activity timestamp is removed
-      this.userLastActivity.delete(userId);
-      logger.info(`[MCP][User: ${userId}] All connections processed for disconnection.`);
+      // Ensure thread activity timestamp is removed
+      this.threadLastActivity.delete(threadId);
+      logger.info(`[MCP][Thread: ${threadId}] All connections processed for disconnection.`);
     }
+  }
+
+  /** Disconnects and removes a specific user connection (legacy method) */
+  public async disconnectUserConnection(userId: string, serverName: string): Promise<void> {
+    // Legacy method - should not be used in new thread-based logic
+    logger.debug(`[MCP][User: ${userId}][${serverName}] Legacy disconnectUserConnection called - consider using thread-based methods.`);
+  }
+
+  /** Disconnects and removes all threads for a specific user */
+  public async disconnectUserThreads(userId: string): Promise<void> {
+    const userThreads = this.userThreadMapping.get(userId);
+    const disconnectPromises: Promise<void>[] = [];
+    if (userThreads) {
+      logger.info(`[MCP][User: ${userId}] Disconnecting all user threads...`);
+      const threadIds = Array.from(userThreads);
+      for (const threadId of threadIds) {
+        disconnectPromises.push(
+          this.disconnectThreadConnections(threadId).catch((error) => {
+            logger.error(
+              `[MCP][User: ${userId}][Thread: ${threadId}] Error during disconnection:`,
+              error,
+            );
+          }),
+        );
+      }
+      await Promise.allSettled(disconnectPromises);
+      // Ensure user activity timestamp and mapping are removed
+      this.userLastActivity.delete(userId);
+      this.userThreadMapping.delete(userId);
+      logger.info(`[MCP][User: ${userId}] All user threads processed for disconnection.`);
+    }
+  }
+
+  /** Disconnects and removes all connections for a specific user (legacy method) */
+  public async disconnectUserConnections(userId: string): Promise<void> {
+    // Use the new thread-based method
+    await this.disconnectUserThreads(userId);
   }
 
   /** Returns the app-level connection (used for mapping tools, etc.) */
@@ -866,9 +1005,22 @@ export class MCPManager {
     logger.info(`${logPrefix}[${toolName}] MCPManager.callTool called with threadId: ${threadId}`);
 
     try {
-      if (userId && user) {
+      if (userId && user && threadId) {
         this.updateUserLastActivity(userId);
-        /** Get or create user-specific connection */
+        /** Get or create thread-specific connection */
+        connection = await this.getThreadConnection({
+          user,
+          threadId,
+          serverName,
+          flowManager,
+          tokenMethods,
+          oauthStart,
+          oauthEnd,
+          signal: options?.signal,
+          customUserVars,
+        });
+      } else if (userId && user) {
+        /** Fallback to getUserConnection for backward compatibility */
         connection = await this.getUserConnection({
           user,
           serverName,
@@ -916,6 +1068,9 @@ export class MCPManager {
       if (userId) {
         this.updateUserLastActivity(userId);
       }
+      if (threadId) {
+        this.updateThreadLastActivity(threadId);
+      }
       this.checkIdleConnections();
       return formatToolContent(result, provider);
     } catch (error) {
@@ -936,15 +1091,17 @@ export class MCPManager {
     }
   }
 
-  /** Disconnects all app-level and user-level connections */
+  /** Disconnects all app-level and thread-level connections */
   public async disconnectAll(): Promise<void> {
-    logger.info('[MCP] Disconnecting all app-level and user-level connections...');
+    logger.info('[MCP] Disconnecting all app-level and thread-level connections...');
 
-    const userDisconnectPromises = Array.from(this.userConnections.keys()).map((userId) =>
-      this.disconnectUserConnections(userId),
+    const userDisconnectPromises = Array.from(this.userThreadMapping.keys()).map((userId) =>
+      this.disconnectUserThreads(userId),
     );
     await Promise.allSettled(userDisconnectPromises);
     this.userLastActivity.clear();
+    this.threadLastActivity.clear();
+    this.userThreadMapping.clear();
 
     // Disconnect all app-level connections
     const appDisconnectPromises = Array.from(this.connections.values()).map((connection) =>

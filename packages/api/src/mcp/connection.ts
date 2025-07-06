@@ -111,7 +111,8 @@ export class MCPConnection extends EventEmitter {
   /** Helper to generate consistent log prefixes */
   private getLogPrefix(): string {
     const userPart = this.userId ? `[User: ${this.userId}]` : '';
-    return `[MCP]${userPart}[${this.serverName}]`;
+    const threadPart = this.threadId ? `[Thread: ${this.threadId}]` : '';
+    return `[MCP]${userPart}${threadPart}[${this.serverName}]`;
   }
 
   public static getInstance(
@@ -134,6 +135,11 @@ export class MCPConnection extends EventEmitter {
       await MCPConnection.instance.disconnect();
       MCPConnection.instance = null;
     }
+  }
+
+  /** Get the thread ID associated with this connection */
+  public getThreadId(): string | undefined {
+    return this.threadId;
   }
 
   private emitError(error: unknown, errorContext: string): void {
