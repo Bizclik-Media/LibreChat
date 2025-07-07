@@ -171,6 +171,10 @@ async function createMCPTool({ req, res, toolKey, provider: _provider }) {
       const customUserVars =
         config?.configurable?.userMCPAuthMap?.[`${Constants.mcp_prefix}${serverName}`];
 
+      const threadId = config?.metadata?.thread_id;
+      logger.info(`[MCP][${serverName}][${toolName}] Tool call with threadId: ${threadId}`);
+      logger.info(`[MCP][${serverName}][${toolName}] Full config object:`, JSON.stringify(config, null, 2));
+
       const result = await mcpManager.callTool({
         serverName,
         toolName,
@@ -189,6 +193,7 @@ async function createMCPTool({ req, res, toolKey, provider: _provider }) {
         },
         oauthStart,
         oauthEnd,
+        threadId,
       });
 
       if (isAssistantsEndpoint(provider) && Array.isArray(result)) {

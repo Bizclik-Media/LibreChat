@@ -261,7 +261,9 @@ const chatV2 = async (req, res) => {
         },
       };
 
+      logger.info(`[chatV2] Calling initThread with thread_id: ${thread_id} (conversationId: ${conversationId})`);
       const result = await initThread({ openai, body: initThreadBody, thread_id });
+      logger.info(`[chatV2] initThread returned thread_id: ${result.thread_id} (was: ${thread_id})`);
       thread_id = result.thread_id;
 
       createOnTextProgress({

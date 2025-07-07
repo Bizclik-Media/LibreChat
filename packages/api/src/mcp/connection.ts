@@ -81,6 +81,7 @@ export class MCPConnection extends EventEmitter {
     private readonly options: t.MCPOptions,
     userId?: string,
     oauthTokens?: MCPOAuthTokens | null,
+    private readonly threadId?: string,
   ) {
     super();
     this.serverName = serverName;
@@ -91,6 +92,9 @@ export class MCPConnection extends EventEmitter {
     if (oauthTokens) {
       this.oauthTokens = oauthTokens;
     }
+
+    const userPart = this.userId ? `[User: ${this.userId}]` : '';
+    logger.info(`[MCP]${userPart}[${this.serverName}] MCPConnection created with threadId: ${this.threadId}`);
     this.client = new Client(
       {
         name: '@librechat/api-client',
@@ -107,7 +111,8 @@ export class MCPConnection extends EventEmitter {
   /** Helper to generate consistent log prefixes */
   private getLogPrefix(): string {
     const userPart = this.userId ? `[User: ${this.userId}]` : '';
-    return `[MCP]${userPart}[${this.serverName}]`;
+    const threadPart = this.threadId ? `[Thread: ${this.threadId}]` : '';
+    return `[MCP]${userPart}${threadPart}[${this.serverName}]`;
   }
 
   public static getInstance(
@@ -130,6 +135,11 @@ export class MCPConnection extends EventEmitter {
       await MCPConnection.instance.disconnect();
       MCPConnection.instance = null;
     }
+  }
+
+  /** Get the thread ID associated with this connection */
+  public getThreadId(): string | undefined {
+    return this.threadId;
   }
 
   private emitError(error: unknown, errorContext: string): void {
@@ -190,6 +200,14 @@ export class MCPConnection extends EventEmitter {
             headers['Authorization'] = `Bearer ${this.oauthTokens.access_token}`;
           }
 
+          // Add thread ID header if available
+          if (this.threadId) {
+            headers['X-Thread-Id'] = this.threadId;
+            logger.info(`${this.getLogPrefix()} Adding X-Thread-Id header: ${this.threadId} for SSE transport`);
+          } else {
+            logger.info(`${this.getLogPrefix()} No threadId available for SSE transport`);
+          }
+
           const transport = new SSEClientTransport(url, {
             requestInit: {
               headers,
@@ -239,6 +257,14 @@ export class MCPConnection extends EventEmitter {
           const headers = { ...options.headers };
           if (this.oauthTokens?.access_token) {
             headers['Authorization'] = `Bearer ${this.oauthTokens.access_token}`;
+          }
+
+          // Add thread ID header if available
+          if (this.threadId) {
+            headers['X-Thread-Id'] = this.threadId;
+            logger.info(`${this.getLogPrefix()} Adding X-Thread-Id header: ${this.threadId} for StreamableHTTP transport`);
+          } else {
+            logger.info(`${this.getLogPrefix()} No threadId available for StreamableHTTP transport`);
           }
 
           const transport = new StreamableHTTPClientTransport(url, {
