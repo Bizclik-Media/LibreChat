@@ -181,6 +181,8 @@ async function setupSaml() {
       idpCert: getCertificateContent(process.env.SAML_CERT),
       wantAssertionsSigned: process.env.SAML_USE_AUTHN_RESPONSE_SIGNED === 'true' ? false : true,
       wantAuthnResponseSigned: process.env.SAML_USE_AUTHN_RESPONSE_SIGNED === 'true' ? true : false,
+      disableRequestedAuthnContext: process.env.SAML_DISABLE_REQUESTED_AUTHN_CONTEXT !== 'false', // Fixes AADSTS75011 authentication method mismatch with Azure AD
+      authnContext: process.env.SAML_AUTHN_CONTEXT ? process.env.SAML_AUTHN_CONTEXT.split(',').map(ctx => ctx.trim()) : undefined, // Custom authentication context class reference(s)
     };
 
     passport.use(

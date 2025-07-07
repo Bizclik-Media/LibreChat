@@ -53,8 +53,10 @@ jest.mocked(fs).readFileSync = jest.fn();
 
 // To capture the verify callback from the strategy, we grab it from the mock constructor
 let verifyCallback;
+let samlOptions;
 SamlStrategy.mockImplementation((options, verify) => {
   verifyCallback = verify;
+  samlOptions = options;
   return { name: 'saml', options, verify };
 });
 
@@ -269,6 +271,17 @@ u7wlOSk+oFzDIO/UILIA
     });
 
     await setupSaml();
+  });
+
+  it('should configure SAML strategy with disableRequestedAuthnContext enabled by default', async () => {
+    expect(samlOptions.disableRequestedAuthnContext).toBe(true);
+  });
+
+  it('should allow disableRequestedAuthnContext to be disabled via environment variable', async () => {
+    process.env.SAML_DISABLE_REQUESTED_AUTHN_CONTEXT = 'false';
+    await setupSaml();
+    expect(samlOptions.disableRequestedAuthnContext).toBe(false);
+    delete process.env.SAML_DISABLE_REQUESTED_AUTHN_CONTEXT;
   });
 
   it('should create a new user with correct username when username claim exists', async () => {
