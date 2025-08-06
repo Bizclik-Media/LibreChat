@@ -172,16 +172,13 @@ export class MCPManager {
     if (tokens) {
       logger.info(`[MCP][${serverName}] Loaded OAuth tokens`);
     }
-    const connection = new MCPConnection(serverName, processedConfig, undefined, tokens);
+    const connection = new MCPConnection(serverName, processedConfig, undefined, tokens, undefined);
     logger.info(`[MCP][${serverName}] Setting up OAuth event listener`);
     connection.on('oauthRequired', async () => {
       logger.debug(`[MCP][${serverName}] oauthRequired event received`);
-
       this.oauthServers.add(serverName);
-
-      // Skip OAuth at startup - let connection fail gracefully
-      logger.info(`[MCP][${serverName}] OAuth required, skipping at startup`);
-      connection.emit('oauthFailed', new Error('OAuth authentication skipped at startup'));
+      // For app-level connections, we don't handle OAuth during startup
+      // The connection will be marked as requiring OAuth for user-level connections
     });
     try {
       const connectTimeout = processedConfig.initTimeout ?? 30000;
