@@ -264,9 +264,8 @@ export class MCPConnection extends EventEmitter {
 
           // Monkey-patch fetch to capture raw responses for debugging
           const originalFetch = (globalThis as any).fetch;
+          let requestCounter = 0;
           (globalThis as any).fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-            const response = await originalFetch(input, init);
-
             // Only intercept MCP requests to our server
             let requestUrl: string;
             if (typeof input === 'string') {
@@ -277,24 +276,47 @@ export class MCPConnection extends EventEmitter {
               requestUrl = (input as Request).url;
             }
 
-            if (requestUrl.includes(url.toString())) {
-              logger.error(`${this.getLogPrefix()} RAW FETCH REQUEST URL: ${requestUrl}`);
-              logger.error(`${this.getLogPrefix()} RAW FETCH REQUEST METHOD: ${init?.method || 'GET'}`);
-              logger.error(`${this.getLogPrefix()} RAW FETCH REQUEST HEADERS: ${JSON.stringify(init?.headers || {})}`);
+            let requestId: string | null = null;
+            let requestBody: string | null = null;
 
+            if (requestUrl.includes(url.toString())) {
+              requestId = `REQ_${++requestCounter}`;
+
+              // Capture request body
+              if (init?.body) {
+                if (typeof init.body === 'string') {
+                  requestBody = init.body;
+                } else if (init.body instanceof FormData) {
+                  requestBody = '[FormData]';
+                } else if (init.body instanceof ArrayBuffer) {
+                  requestBody = '[ArrayBuffer]';
+                } else {
+                  requestBody = '[Unknown body type]';
+                }
+              }
+
+              logger.error(`${this.getLogPrefix()} [${requestId}] RAW FETCH REQUEST URL: ${requestUrl}`);
+              logger.error(`${this.getLogPrefix()} [${requestId}] RAW FETCH REQUEST METHOD: ${init?.method || 'GET'}`);
+              logger.error(`${this.getLogPrefix()} [${requestId}] RAW FETCH REQUEST HEADERS: ${JSON.stringify(init?.headers || {})}`);
+              logger.error(`${this.getLogPrefix()} [${requestId}] RAW FETCH REQUEST BODY: ${requestBody || '[No body]'}`);
+            }
+
+            const response = await originalFetch(input, init);
+
+            if (requestId) {
               // Clone the response to read the body without consuming it
               const clonedResponse = response.clone();
               try {
                 const responseText = await clonedResponse.text();
-                logger.error(`${this.getLogPrefix()} RAW FETCH RESPONSE STATUS: ${response.status}`);
+                logger.error(`${this.getLogPrefix()} [${requestId}] RAW FETCH RESPONSE STATUS: ${response.status}`);
                 const headersObj: Record<string, string> = {};
                 response.headers.forEach((value: string, key: string) => {
                   headersObj[key] = value;
                 });
-                logger.error(`${this.getLogPrefix()} RAW FETCH RESPONSE HEADERS: ${JSON.stringify(headersObj)}`);
-                logger.error(`${this.getLogPrefix()} RAW FETCH RESPONSE BODY: ${responseText}`);
+                logger.error(`${this.getLogPrefix()} [${requestId}] RAW FETCH RESPONSE HEADERS: ${JSON.stringify(headersObj)}`);
+                logger.error(`${this.getLogPrefix()} [${requestId}] RAW FETCH RESPONSE BODY: ${responseText}`);
               } catch (err) {
-                logger.error(`${this.getLogPrefix()} Failed to read response body for debugging: ${err}`);
+                logger.error(`${this.getLogPrefix()} [${requestId}] Failed to read response body for debugging: ${err}`);
               }
 
               // Restore original fetch after first request to avoid infinite loops
