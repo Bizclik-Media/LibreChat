@@ -346,10 +346,27 @@ async function getServerConnectionStatus(
   userConnections,
   oauthServers,
 ) {
-  const getConnectionState = () =>
-    appConnections.get(serverName)?.connectionState ??
-    userConnections.get(serverName)?.connectionState ??
-    'disconnected';
+  // Check for any active thread connections for this user/server
+  const mcpManager = getMCPManager(userId);
+  const userThreads = mcpManager.getUserThreads(userId);
+
+  let hasActiveThreadConnection = false;
+  for (const threadId of userThreads) {
+    const threadConnection = mcpManager.getThreadConnectionStatus(threadId, serverName);
+    if (threadConnection && await threadConnection.isConnected()) {
+      hasActiveThreadConnection = true;
+      break;
+    }
+  }
+
+  const getConnectionState = () => {
+    if (hasActiveThreadConnection) {
+      return 'connected';
+    }
+    return appConnections.get(serverName)?.connectionState ??
+           userConnections.get(serverName)?.connectionState ??
+           'disconnected';
+  };
 
   const baseConnectionState = getConnectionState();
   let finalConnectionState = baseConnectionState;

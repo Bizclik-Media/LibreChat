@@ -408,7 +408,49 @@ export class MCPManager {
     }
   }
 
-  /** Gets or creates a connection for a specific thread */
+  /**
+   * Propagates OAuth tokens to all active thread connections for a user/server
+   * This ensures that when one thread completes OAuth, all other threads get the tokens
+   */
+  private async propagateOAuthTokensToUserThreads(
+    userId: string,
+    serverName: string,
+    tokens: MCPOAuthTokens
+  ): Promise<void> {
+    const userThreads = this.userThreadMapping.get(userId);
+    if (!userThreads) {
+      return;
+    }
+
+    logger.info(`[MCP][User: ${userId}][${serverName}] Propagating OAuth tokens to ${userThreads.size} user threads`);
+
+    for (const threadId of userThreads) {
+      const threadMap = this.threadConnections.get(threadId);
+      const connection = threadMap?.get(serverName);
+
+      if (connection && await connection.isConnected()) {
+        try {
+          connection.setOAuthTokens(tokens);
+          logger.debug(`[MCP][User: ${userId}][Thread: ${threadId}][${serverName}] OAuth tokens propagated to thread connection`);
+        } catch (error) {
+          logger.error(`[MCP][User: ${userId}][Thread: ${threadId}][${serverName}] Failed to propagate OAuth tokens:`, error);
+        }
+      }
+    }
+  }
+
+  /** Get all thread IDs for a user */
+  public getUserThreads(userId: string): Set<string> {
+    return this.userThreadMapping.get(userId) || new Set();
+  }
+
+  /** Get thread connection for a specific thread and server (for status checking) */
+  public getThreadConnectionStatus(threadId: string, serverName: string): MCPConnection | undefined {
+    const threadMap = this.threadConnections.get(threadId);
+    return threadMap?.get(serverName);
+  }
+
+  /** Gets or creates a connection for a specific thread, sharing user-level OAuth tokens */
   public async getThreadConnection({
     user,
     threadId,
@@ -488,7 +530,8 @@ export class MCPManager {
     }
 
     config = { ...(processMCPEnv(config, user, customUserVars) ?? {}) };
-    /** If no in-memory tokens, tokens from persistent storage */
+
+    // *** KEY CHANGE: Load user-level OAuth tokens for this thread connection ***
     let tokens: MCPOAuthTokens | null = null;
     if (tokenMethods?.findToken) {
       try {
@@ -541,7 +584,7 @@ export class MCPManager {
     }
 
     if (tokens) {
-      logger.info(`[MCP][User: ${userId}][${serverName}] Loaded OAuth tokens`);
+      logger.info(`[MCP][User: ${userId}][Thread: ${threadId}][${serverName}] Loaded user-level OAuth tokens for thread connection`);
     }
 
     logger.info(`[MCP][User: ${userId}][${serverName}] Creating new MCPConnection with threadId: ${threadId}`);
@@ -601,8 +644,9 @@ export class MCPManager {
       if (result?.tokens && tokenMethods?.createToken) {
         try {
           connection?.setOAuthTokens(result.tokens);
+          // Store tokens at user level (not thread level)
           await MCPTokenStorage.storeTokens({
-            userId,
+            userId, // User-level storage
             serverName,
             tokens: result.tokens,
             createToken: tokenMethods.createToken,
@@ -610,10 +654,14 @@ export class MCPManager {
             findToken: tokenMethods.findToken,
             clientInfo: result.clientInfo,
           });
-          logger.info(`[MCP][User: ${userId}][${serverName}] OAuth tokens saved to storage`);
+          logger.info(`[MCP][User: ${userId}][Thread: ${threadId}][${serverName}] OAuth tokens saved to user-level storage`);
+
+          // *** IMPORTANT: Update all other thread connections for this user/server with new tokens ***
+          await this.propagateOAuthTokensToUserThreads(userId, serverName, result.tokens);
+
         } catch (error) {
           logger.error(
-            `[MCP][User: ${userId}][${serverName}] Failed to save OAuth tokens to storage`,
+            `[MCP][User: ${userId}][Thread: ${threadId}][${serverName}] Failed to save OAuth tokens to storage`,
             error,
           );
         }
