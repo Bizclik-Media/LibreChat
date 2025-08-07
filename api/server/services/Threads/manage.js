@@ -11,6 +11,7 @@ const { recordMessage, getMessages } = require('~/models/Message');
 const { countTokens, escapeRegExp } = require('~/server/utils');
 const { spendTokens } = require('~/models/spendTokens');
 const { saveConvo } = require('~/models/Conversation');
+const { logger } = require('@librechat/data-schemas');
 
 /**
  * Initializes a new thread or adds messages to an existing thread.
