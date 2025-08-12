@@ -555,16 +555,41 @@ class StreamRunManager {
   async onRunRequiresAction(event) {
     const run = event.data;
     const { submit_tool_outputs } = run.required_action;
+
+    // FUCKING LOG EVERYTHING TO SEE WHAT WE GET
+    console.log('====== FULL RUN OBJECT DEBUG ======');
+    console.log('Full run object:', JSON.stringify(run, null, 2));
+    console.log('====== SUBMIT_TOOL_OUTPUTS DEBUG ======');
+    console.log('submit_tool_outputs:', JSON.stringify(submit_tool_outputs, null, 2));
+    console.log('====== INDIVIDUAL TOOL_CALLS DEBUG ======');
+    submit_tool_outputs.tool_calls.forEach((item, index) => {
+      console.log(`Tool call ${index}:`, JSON.stringify(item, null, 2));
+      console.log(`Function object:`, JSON.stringify(item.function, null, 2));
+      console.log(`Has display_only?:`, 'display_only' in item.function);
+      console.log(`display_only value:`, item.function.display_only);
+    });
+    console.log('====== END TOOL_CALLS DEBUG ======');
+
     const actions = submit_tool_outputs.tool_calls.map((item) => {
       const functionCall = item.function;
       const args = JSON.parse(functionCall.arguments);
-      return {
+
+      // Check for display_only property
+      const action = {
         tool: functionCall.name,
         toolInput: args,
         toolCallId: item.id,
         run_id: run.id,
         thread_id: this.thread_id,
       };
+
+      // Preserve display_only property if it exists
+      if (functionCall.display_only === true) {
+        action.display_only = true;
+        logger.info(`Tool call ${functionCall.name} marked as display_only`);
+      }
+
+      return action;
     });
 
     const { tool_outputs: preliminaryOutputs } = await processRequiredActions(this, actions);
