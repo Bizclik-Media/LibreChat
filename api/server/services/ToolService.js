@@ -222,6 +222,17 @@ const processVisionRequest = async (client, currentAction) => {
  * @returns {Promise<ToolOutputs>} The outputs of the tools.
  */
 async function processRequiredActions(client, requiredActions) {
+  const stackTrace = new Error().stack.split('\n');
+  const entryDebugData = {
+    event: 'PROCESS_REQUIRED_ACTIONS_ENTRY',
+    userId: client.req.user.id,
+    threadId: requiredActions[0]?.thread_id,
+    runId: requiredActions[0]?.run_id,
+    requiredActions: requiredActions,
+    fullStackTrace: stackTrace
+  };
+  logger.debug(JSON.stringify(entryDebugData));
+
   logger.debug(
     `[required actions] user: ${client.req.user.id} | thread_id: ${requiredActions[0].thread_id} | run_id: ${requiredActions[0].run_id}`,
     requiredActions,
@@ -281,7 +292,26 @@ async function processRequiredActions(client, requiredActions) {
       promises.push(processVisionRequest(client, currentAction));
       continue;
     }
+    const stackTrace = new Error().stack.split('\n');
+    const toolLookupDebugData = {
+      event: 'TOOL_LOOKUP_DEBUG',
+      currentAction: currentAction,
+      toolName: currentAction.tool,
+      hasDisplayOnly: 'display_only' in currentAction,
+      displayOnlyValue: currentAction.display_only,
+      fullStackTrace: stackTrace
+    };
+    logger.debug(JSON.stringify(toolLookupDebugData));
+
     let tool = ToolMap[currentAction.tool] ?? ActionToolMap[currentAction.tool];
+
+    const toolFoundDebugData = {
+      event: 'TOOL_FOUND_RESULT',
+      toolName: currentAction.tool,
+      toolFound: !!tool,
+      fullStackTrace: stackTrace
+    };
+    logger.debug(JSON.stringify(toolFoundDebugData));
 
     const handleToolOutput = async (output) => {
       requiredActions[i].output = output;
