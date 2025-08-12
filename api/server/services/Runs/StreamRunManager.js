@@ -557,18 +557,18 @@ class StreamRunManager {
     const { submit_tool_outputs } = run.required_action;
 
     // FUCKING LOG EVERYTHING TO SEE WHAT WE GET
-    console.log('====== FULL RUN OBJECT DEBUG ======');
-    console.log('Full run object:', JSON.stringify(run, null, 2));
-    console.log('====== SUBMIT_TOOL_OUTPUTS DEBUG ======');
-    console.log('submit_tool_outputs:', JSON.stringify(submit_tool_outputs, null, 2));
-    console.log('====== INDIVIDUAL TOOL_CALLS DEBUG ======');
+    logger.info('====== FULL RUN OBJECT DEBUG ======');
+    logger.info('Full run object:', JSON.stringify(run, null, 2));
+    logger.info('====== SUBMIT_TOOL_OUTPUTS DEBUG ======');
+    logger.info('submit_tool_outputs:', JSON.stringify(submit_tool_outputs, null, 2));
+    logger.info('====== INDIVIDUAL TOOL_CALLS DEBUG ======');
     submit_tool_outputs.tool_calls.forEach((item, index) => {
-      console.log(`Tool call ${index}:`, JSON.stringify(item, null, 2));
-      console.log(`Function object:`, JSON.stringify(item.function, null, 2));
-      console.log(`Has display_only?:`, 'display_only' in item.function);
-      console.log(`display_only value:`, item.function.display_only);
+      logger.info(`Tool call ${index}:`, JSON.stringify(item, null, 2));
+      logger.info(`Function object:`, JSON.stringify(item.function, null, 2));
+      logger.info(`Has display_only?:`, 'display_only' in item.function);
+      logger.info(`display_only value:`, item.function.display_only);
     });
-    console.log('====== END TOOL_CALLS DEBUG ======');
+    logger.info('====== END TOOL_CALLS DEBUG ======');
 
     const actions = submit_tool_outputs.tool_calls.map((item) => {
       const functionCall = item.function;
