@@ -584,6 +584,18 @@ class AgentClient extends BaseClient {
 
   /** @type {sendCompletion} */
   async sendCompletion(payload, opts = {}) {
+    // Add conversationId header after BaseClient has set this.conversationId
+    // but before calling chatCompletion which creates the LangChain client
+    if (this.conversationId && this.options.agent.model_parameters?.configuration) {
+      if (!this.options.agent.model_parameters.configuration.defaultHeaders) {
+        this.options.agent.model_parameters.configuration.defaultHeaders = {};
+      }
+      this.options.agent.model_parameters.configuration.defaultHeaders['x-conversation-id'] = this.conversationId;
+      logger.info('[AgentClient] Added x-conversation-id header to agent config: ' + this.conversationId);
+    } else {
+      logger.info('[AgentClient] Could not add x-conversation-id header - conversationId: ' + this.conversationId + ', config exists: ' + !!this.options.agent.model_parameters?.configuration);
+    }
+
     await this.chatCompletion({
       payload,
       onProgress: opts.onProgress,
