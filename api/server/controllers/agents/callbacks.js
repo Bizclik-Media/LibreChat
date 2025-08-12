@@ -114,6 +114,15 @@ function getDefaultHandlers({ res, aggregateContent, toolEndCallback, collectedU
     [GraphEvents.CHAT_MODEL_END]: new ModelEndHandler(collectedUsage),
     [GraphEvents.TOOL_END]: new ToolEndHandler(toolEndCallback),
     [GraphEvents.CHAT_MODEL_STREAM]: new ChatModelStreamHandler(),
+    [GraphEvents.TOOL_START]: {
+      handle: (event, data, metadata) => {
+        logger.info('====== TOOL_START DEBUG ======');
+        logger.info('Event:', event);
+        logger.info('Data:', JSON.stringify(data, null, 2));
+        logger.info('Metadata:', JSON.stringify(metadata, null, 2));
+        logger.info('====== END TOOL_START DEBUG ======');
+      },
+    },
     [GraphEvents.ON_RUN_STEP]: {
       /**
        * Handle ON_RUN_STEP event.
