@@ -1,5 +1,8 @@
+const jwt = require('jsonwebtoken');
+const { ExtractJwt } = require('passport-jwt');
 const { isAgentsEndpoint, ResourceType, PermissionBits, Time, CacheKeys } = require('librechat-data-provider');
 const { findAccessibleResources } = require('~/server/services/PermissionService');
+const { getUserById } = require('~/models');
 const { getLogStores } = require('~/cache');
 const { logger } = require('@librechat/data-schemas');
 
@@ -15,12 +18,28 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
     return modelSpecs;
   }
 
-  const userId = req.user?.id;
-  if (!userId) {
-    logger.warn('[filterModelSpecs] No user ID found, returning unchanged');
+  // Extract JWT token and get user
+  const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
+  if (!token) {
+    logger.debug('[filterModelSpecs] No JWT token found, returning unchanged');
     return modelSpecs;
   }
 
+  let user;
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    logger.debug(`[filterModelSpecs] JWT payload:`, payload);
+    user = await getUserById(payload.id, '-password -__v -totpSecret -backupCodes');
+    if (!user) {
+      logger.debug('[filterModelSpecs] User not found, returning unchanged');
+      return modelSpecs;
+    }
+  } catch (err) {
+    logger.debug('[filterModelSpecs] JWT verification failed, returning unchanged');
+    return modelSpecs;
+  }
+
+  const userId = user._id.toString();
   logger.debug(`[filterModelSpecs] Filtering ${modelSpecs.list.length} ModelSpecs for user ${userId}`);
 
   // Check per-user cache first
@@ -36,7 +55,7 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
   // Get agent IDs the user has VIEW access to via ACL
   const accessibleAgentIds = await findAccessibleResources({
     userId,
-    role: req.user.role,
+    role: user.role,
     resourceType: ResourceType.AGENT,
     requiredPermissions: PermissionBits.VIEW,
   });
