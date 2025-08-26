@@ -3,6 +3,7 @@ const { ExtractJwt } = require('passport-jwt');
 const { isAgentsEndpoint, ResourceType, PermissionBits, Time, CacheKeys } = require('librechat-data-provider');
 const { findAccessibleResources } = require('~/server/services/PermissionService');
 const { getUserById } = require('~/models');
+const { Agent } = require('~/db/models');
 const { getLogStores } = require('~/cache');
 const { logger } = require('@librechat/data-schemas');
 
@@ -52,7 +53,7 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
     return cachedFiltered;
   }
 
-  // Get agent IDs the user has VIEW access to via ACL
+  // Get agent IDs the user has VIEW access to via ACL (these are MongoDB ObjectIds)
   const accessibleAgentIds = await findAccessibleResources({
     userId,
     role: user.role,
@@ -61,6 +62,16 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
   });
 
   logger.debug(`[filterModelSpecs] User ${userId} has VIEW access to ${accessibleAgentIds.length} agents: [${accessibleAgentIds.map(id => id.toString()).join(', ')}]`);
+
+  // Query agents by MongoDB _id to get their string id field
+  const accessibleAgents = await Agent.find(
+    { _id: { $in: accessibleAgentIds } },
+    { id: 1 }
+  ).lean();
+
+  // Extract string IDs that ModelSpecs use
+  const accessibleStringIds = accessibleAgents.map(agent => agent.id);
+  logger.debug(`[filterModelSpecs] Accessible agent string IDs: [${accessibleStringIds.join(', ')}]`);
 
   // Filter ModelSpecs based on agent access
   const filteredList = modelSpecs.list.filter(spec => {
@@ -78,8 +89,8 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
     }
 
     // Check if user has VIEW access to this specific agent
-    // accessibleAgentIds contains ObjectIds, agentId is a string
-    const hasAccess = accessibleAgentIds.some(id => id.toString() === agentId);
+    // Use string ID comparison with ModelSpec agent_id
+    const hasAccess = accessibleStringIds.includes(agentId);
 
     if (hasAccess) {
       logger.debug(`[filterModelSpecs] Keeping agent ModelSpec ${spec.name} - user has access to agent ${agentId}`);
