@@ -31,7 +31,7 @@ router.get('/', async function (req, res) {
   const cachedStartupConfig = await cache.get(CacheKeys.STARTUP_CONFIG);
   if (cachedStartupConfig) {
     cachedStartupConfig.modelSpecs = await filterModelSpecsByPermissions(req, cachedStartupConfig.modelSpecs);
-    res.send(userSpecificConfig);
+    res.send(cachedStartupConfig);
     return;
   }
 
@@ -95,7 +95,7 @@ router.get('/', async function (req, res) {
       helpAndFaqURL: process.env.HELP_AND_FAQ_URL || 'https://librechat.ai',
       interface: req.app.locals.interfaceConfig,
       turnstile: req.app.locals.turnstileConfig,
-      modelSpecs: await filterModelSpecsByPermissions(req, req.app.locals.modelSpecs),
+      modelSpecs: req.app.locals.modelSpecs,
       balance: req.app.locals.balance,
       sharedLinksEnabled,
       publicSharedLinksEnabled,
@@ -160,6 +160,7 @@ router.get('/', async function (req, res) {
     }
 
     await cache.set(CacheKeys.STARTUP_CONFIG, payload);
+    payload.modelSpecs = await filterModelSpecsByPermissions(req, payload.modelSpecs);
     return res.status(200).send(payload);
   } catch (err) {
     logger.error('Error in startup config', err);
