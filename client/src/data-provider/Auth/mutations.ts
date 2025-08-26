@@ -47,6 +47,7 @@ export const useLoginUserMutation = (
     },
     onSuccess: (...args) => {
       setQueriesEnabled(true);
+      queryClient.invalidateQueries([QueryKeys.startupConfig]);
       options?.onSuccess?.(...args);
     },
   });
