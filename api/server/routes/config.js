@@ -7,6 +7,7 @@ const { getLdapConfig } = require('~/server/services/Config/ldap');
 const { getProjectByName } = require('~/models/Project');
 const { getMCPManager } = require('~/config');
 const { getLogStores } = require('~/cache');
+const { filterModelSpecsByPermissions } = require('~/server/services/Config/filterModelSpecs');
 
 const router = express.Router();
 const emailLoginEnabled =
@@ -93,7 +94,7 @@ router.get('/', async function (req, res) {
       helpAndFaqURL: process.env.HELP_AND_FAQ_URL || 'https://librechat.ai',
       interface: req.app.locals.interfaceConfig,
       turnstile: req.app.locals.turnstileConfig,
-      modelSpecs: req.app.locals.modelSpecs,
+      modelSpecs: await filterModelSpecsByPermissions(req, req.app.locals.modelSpecs),
       balance: req.app.locals.balance,
       sharedLinksEnabled,
       publicSharedLinksEnabled,
