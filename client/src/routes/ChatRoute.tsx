@@ -15,10 +15,8 @@ import { useRecoilCallback } from 'recoil';
 import store from '~/store';
 
 export default function ChatRoute() {
+  const { data: startupConfig } = useGetStartupConfig();
   const { isAuthenticated, user } = useAuthRedirect();
-  const { data: startupConfig } = useGetStartupConfig({
-    staleTime: isAuthenticated ? 0 : Infinity,
-  });
 
   const setIsTemporary = useRecoilCallback(
     ({ set }) =>

@@ -38,7 +38,9 @@ export default function Root() {
   const agentsMap = useAgentsMap({ isAuthenticated });
   const fileMap = useFileMap({ isAuthenticated });
 
-  const { data: config } = useGetStartupConfig();
+  const { data: config } = useGetStartupConfig({
+    refetchOnMount: 'always',
+  });
   const { data: termsData } = useUserTermsQuery({
     enabled: isAuthenticated && config?.interface?.termsOfService?.modalAcceptance === true,
   });
