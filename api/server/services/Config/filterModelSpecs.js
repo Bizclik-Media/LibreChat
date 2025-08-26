@@ -1,5 +1,6 @@
-const { isAgentsEndpoint, ResourceType, PermissionBits } = require('librechat-data-provider');
+const { isAgentsEndpoint, ResourceType, PermissionBits, Time, CacheKeys } = require('librechat-data-provider');
 const { findAccessibleResources } = require('~/server/services/PermissionService');
+const { getLogStores } = require('~/cache');
 const { logger } = require('@librechat/data-schemas');
 
 /**
@@ -22,6 +23,16 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
 
   logger.debug(`[filterModelSpecs] Filtering ${modelSpecs.list.length} ModelSpecs for user ${userId}`);
 
+  // Check per-user cache first
+  const cache = getLogStores(CacheKeys.CONFIG_STORE);
+  const userCacheKey = `FILTERED_MODELSPECS_${userId}`;
+  const cachedFiltered = await cache.get(userCacheKey);
+
+  if (cachedFiltered) {
+    logger.debug(`[filterModelSpecs] Using cached filtered ModelSpecs for user ${userId}`);
+    return cachedFiltered;
+  }
+
   // Get agent IDs the user has VIEW access to via ACL
   const accessibleAgentIds = await findAccessibleResources({
     userId,
@@ -30,7 +41,7 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
     requiredPermissions: PermissionBits.VIEW,
   });
 
-  logger.debug(`[filterModelSpecs] User ${userId} has VIEW access to ${accessibleAgentIds.length} agents`);
+  logger.debug(`[filterModelSpecs] User ${userId} has VIEW access to ${accessibleAgentIds.length} agents: [${accessibleAgentIds.map(id => id.toString()).join(', ')}]`);
 
   // Filter ModelSpecs based on agent access
   const filteredList = modelSpecs.list.filter(spec => {
@@ -48,6 +59,7 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
     }
 
     // Check if user has VIEW access to this specific agent
+    // accessibleAgentIds contains ObjectIds, agentId is a string
     const hasAccess = accessibleAgentIds.some(id => id.toString() === agentId);
 
     if (hasAccess) {
@@ -61,10 +73,16 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
 
   logger.debug(`[filterModelSpecs] Filtered from ${modelSpecs.list.length} to ${filteredList.length} ModelSpecs`);
 
-  return {
+  const filteredResult = {
     ...modelSpecs,
     list: filteredList,
   };
+
+  // Cache the filtered result for this user (10 minutes TTL)
+  await cache.set(userCacheKey, filteredResult, Time.TEN_MINUTES);
+  logger.debug(`[filterModelSpecs] Cached filtered ModelSpecs for user ${userId} for 10 minutes`);
+
+  return filteredResult;
 }
 
 module.exports = { filterModelSpecsByPermissions };

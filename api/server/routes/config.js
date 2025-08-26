@@ -30,7 +30,8 @@ router.get('/', async function (req, res) {
 
   const cachedStartupConfig = await cache.get(CacheKeys.STARTUP_CONFIG);
   if (cachedStartupConfig) {
-    res.send(cachedStartupConfig);
+    cachedStartupConfig.modelSpecs = await filterModelSpecsByPermissions(req, cachedStartupConfig.modelSpecs);
+    res.send(userSpecificConfig);
     return;
   }
 
