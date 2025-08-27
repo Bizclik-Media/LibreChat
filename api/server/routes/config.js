@@ -7,6 +7,7 @@ const { getLdapConfig } = require('~/server/services/Config/ldap');
 const { getProjectByName } = require('~/models/Project');
 const { getMCPManager } = require('~/config');
 const { getLogStores } = require('~/cache');
+const { filterModelSpecsByPermissions } = require('~/server/services/Config/filterModelSpecs');
 
 const router = express.Router();
 const emailLoginEnabled =
@@ -21,11 +22,15 @@ const publicSharedLinksEnabled =
   (process.env.ALLOW_SHARED_LINKS_PUBLIC === undefined ||
     isEnabled(process.env.ALLOW_SHARED_LINKS_PUBLIC));
 
+const sharePointFilePickerEnabled = isEnabled(process.env.ENABLE_SHAREPOINT_FILEPICKER);
+const openidReuseTokens = isEnabled(process.env.OPENID_REUSE_TOKENS);
+
 router.get('/', async function (req, res) {
   const cache = getLogStores(CacheKeys.CONFIG_STORE);
 
   const cachedStartupConfig = await cache.get(CacheKeys.STARTUP_CONFIG);
   if (cachedStartupConfig) {
+    cachedStartupConfig.modelSpecs = await filterModelSpecsByPermissions(req, cachedStartupConfig.modelSpecs);
     res.send(cachedStartupConfig);
     return;
   }
@@ -98,22 +103,30 @@ router.get('/', async function (req, res) {
       instanceProjectId: instanceProject._id.toString(),
       bundlerURL: process.env.SANDPACK_BUNDLER_URL,
       staticBundlerURL: process.env.SANDPACK_STATIC_BUNDLER_URL,
+      sharePointFilePickerEnabled,
+      sharePointBaseUrl: process.env.SHAREPOINT_BASE_URL,
+      sharePointPickerGraphScope: process.env.SHAREPOINT_PICKER_GRAPH_SCOPE,
+      sharePointPickerSharePointScope: process.env.SHAREPOINT_PICKER_SHAREPOINT_SCOPE,
+      openidReuseTokens,
     };
 
     payload.mcpServers = {};
     const config = await getCustomConfig();
     if (config?.mcpServers != null) {
-      const mcpManager = getMCPManager();
-      const oauthServers = mcpManager.getOAuthServers();
-
-      for (const serverName in config.mcpServers) {
-        const serverConfig = config.mcpServers[serverName];
-        payload.mcpServers[serverName] = {
-          customUserVars: serverConfig?.customUserVars || {},
-          chatMenu: serverConfig?.chatMenu,
-          isOAuth: oauthServers.has(serverName),
-          startup: serverConfig?.startup,
-        };
+      try {
+        const mcpManager = getMCPManager();
+        const oauthServers = mcpManager.getOAuthServers();
+        for (const serverName in config.mcpServers) {
+          const serverConfig = config.mcpServers[serverName];
+          payload.mcpServers[serverName] = {
+            startup: serverConfig?.startup,
+            chatMenu: serverConfig?.chatMenu,
+            isOAuth: oauthServers?.has(serverName),
+            customUserVars: serverConfig?.customUserVars || {},
+          };
+        }
+      } catch (err) {
+        logger.error('Error loading MCP servers', err);
       }
     }
 
@@ -147,6 +160,7 @@ router.get('/', async function (req, res) {
     }
 
     await cache.set(CacheKeys.STARTUP_CONFIG, payload);
+    payload.modelSpecs = await filterModelSpecsByPermissions(req, payload.modelSpecs);
     return res.status(200).send(payload);
   } catch (err) {
     logger.error('Error in startup config', err);

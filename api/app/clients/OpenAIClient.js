@@ -654,8 +654,10 @@ class OpenAIClient extends BaseClient {
       configOptions.baseOptions = {
         headers: {
           ...resolveHeaders({
-            ...headers,
-            ...configOptions?.baseOptions?.headers,
+            headers: {
+              ...headers,
+              ...configOptions?.baseOptions?.headers,
+            },
           }),
           ...(this.conversationId && { 'x-conversation-id': this.conversationId })
         },
@@ -752,7 +754,7 @@ class OpenAIClient extends BaseClient {
         groupMap,
       });
 
-      this.options.headers = resolveHeaders(headers);
+      this.options.headers = resolveHeaders({ headers });
       this.options.reverseProxyUrl = baseURL ?? null;
       this.langchainProxy = extractBaseURL(this.options.reverseProxyUrl);
       this.apiKey = azureOptions.azureOpenAIApiKey;
@@ -1184,7 +1186,7 @@ ${convo}
           modelGroupMap,
           groupMap,
         });
-        opts.defaultHeaders = resolveHeaders(headers);
+        opts.defaultHeaders = resolveHeaders({ headers });
         this.langchainProxy = extractBaseURL(baseURL);
         this.apiKey = azureOptions.azureOpenAIApiKey;
 
@@ -1225,7 +1227,9 @@ ${convo}
       }
 
       if (this.isOmni === true && modelOptions.max_tokens != null) {
-        modelOptions.max_completion_tokens = modelOptions.max_tokens;
+        const paramName =
+          modelOptions.useResponsesApi === true ? 'max_output_tokens' : 'max_completion_tokens';
+        modelOptions[paramName] = modelOptions.max_tokens;
         delete modelOptions.max_tokens;
       }
       if (this.isOmni === true && modelOptions.temperature != null) {
