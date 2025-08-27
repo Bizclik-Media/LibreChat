@@ -49,7 +49,6 @@ RUN mkdir -p /app/client/public/images /app/api/logs
 # Node API setup
 EXPOSE 3080
 ENV HOST=0.0.0.0
-RUN npm run migrate:agent-permissions
 CMD ["npm", "run", "backend"]
 
 # Optional: for client with nginx routing
