@@ -1,9 +1,16 @@
 const { logger } = require('@librechat/data-schemas');
 const { SerpAPI } = require('@langchain/community/tools/serpapi');
 const { Calculator } = require('@langchain/community/tools/calculator');
-const { mcpToolPattern, loadWebSearchAuth } = require('@librechat/api');
+const { mcpToolPattern, loadWebSearchAuth, checkAccess } = require('@librechat/api');
 const { EnvVar, createCodeExecutionTool, createSearchTool } = require('@librechat/agents');
-const { Tools, Constants, EToolResources, replaceSpecialVars } = require('librechat-data-provider');
+const {
+  Tools,
+  Constants,
+  Permissions,
+  EToolResources,
+  PermissionTypes,
+  replaceSpecialVars,
+} = require('librechat-data-provider');
 const {
   availableTools,
   manifestToolMap,
@@ -27,6 +34,7 @@ const { getUserPluginAuthValue } = require('~/server/services/PluginService');
 const { createMCPTool, createMCPTools } = require('~/server/services/MCP');
 const { loadAuthValues } = require('~/server/services/Tools/credentials');
 const { getCachedTools } = require('~/server/services/Config');
+const { getRoleByName } = require('~/models/Role');
 
 /**
  * Validates the availability and authentication of tools for a user based on environment variables or user-specific plugin authentication values.
@@ -121,18 +129,21 @@ const getAuthFields = (toolKey) => {
 
 /**
  *
- * @param {object} object
- * @param {string} object.user
+ * @param {object} params
+ * @param {string} params.user
  * @param {Record<string, Record<string, string>>} [object.userMCPAuthMap]
  * @param {AbortSignal} [object.signal]
- * @param {Pick<Agent, 'id' | 'provider' | 'model'>} [object.agent]
- * @param {string} [object.model]
- * @param {EModelEndpoint} [object.endpoint]
- * @param {LoadToolOptions} [object.options]
- * @param {boolean} [object.useSpecs]
- * @param {Array<string>} object.tools
- * @param {boolean} [object.functions]
- * @param {boolean} [object.returnMap]
+ * @param {Pick<Agent, 'id' | 'provider' | 'model'>} [params.agent]
+ * @param {string} [params.model]
+ * @param {EModelEndpoint} [params.endpoint]
+ * @param {LoadToolOptions} [params.options]
+ * @param {boolean} [params.useSpecs]
+ * @param {Array<string>} params.tools
+ * @param {boolean} [params.functions]
+ * @param {boolean} [params.returnMap]
+ * @param {AppConfig['webSearch']} [params.webSearch]
+ * @param {AppConfig['fileStrategy']} [params.fileStrategy]
+ * @param {AppConfig['imageOutputType']} [params.imageOutputType]
  * @returns {Promise<{ loadedTools: Tool[], toolContextMap: Object<string, any> } | Record<string,Tool>>}
  */
 const loadTools = async ({
@@ -146,6 +157,9 @@ const loadTools = async ({
   options = {},
   functions = true,
   returnMap = false,
+  webSearch,
+  fileStrategy,
+  imageOutputType,
 }) => {
   const toolConstructors = {
     flux: FluxAPI,
@@ -204,6 +218,8 @@ const loadTools = async ({
         ...authValues,
         isAgent: !!agent,
         req: options.req,
+        imageOutputType,
+        fileStrategy,
         imageFiles,
       });
     },
@@ -219,7 +235,7 @@ const loadTools = async ({
   const imageGenOptions = {
     isAgent: !!agent,
     req: options.req,
-    fileStrategy: options.fileStrategy,
+    fileStrategy,
     processFileURL: options.processFileURL,
     returnMetadata: options.returnMetadata,
     uploadImageBuffer: options.uploadImageBuffer,
@@ -273,15 +289,36 @@ const loadTools = async ({
         if (toolContext) {
           toolContextMap[tool] = toolContext;
         }
-        return createFileSearchTool({ req: options.req, files, entity_id: agent?.id });
+
+        /** @type {boolean | undefined} Check if user has FILE_CITATIONS permission */
+        let fileCitations;
+        if (fileCitations == null && options.req?.user != null) {
+          try {
+            fileCitations = await checkAccess({
+              user: options.req.user,
+              permissionType: PermissionTypes.FILE_CITATIONS,
+              permissions: [Permissions.USE],
+              getRoleByName,
+            });
+          } catch (error) {
+            logger.error('[handleTools] FILE_CITATIONS permission check failed:', error);
+            fileCitations = false;
+          }
+        }
+
+        return createFileSearchTool({
+          req: options.req,
+          files,
+          entity_id: agent?.id,
+          fileCitations,
+        });
       };
       continue;
     } else if (tool === Tools.web_search) {
-      const webSearchConfig = options?.req?.app?.locals?.webSearch;
       const result = await loadWebSearchAuth({
         userId: user,
         loadAuthValues,
-        webSearchConfig,
+        webSearchConfig: webSearch,
       });
       const { onSearchResults, onGetHighlights } = options?.[Tools.web_search] ?? {};
       requestedTools[tool] = async () => {
@@ -305,6 +342,16 @@ Current Date & Time: ${replaceSpecialVars({ text: '{{iso_datetime}}' })}
       continue;
     } else if (tool && cachedTools && mcpToolPattern.test(tool)) {
       const [toolName, serverName] = tool.split(Constants.mcp_delimiter);
+      if (toolName === Constants.mcp_server) {
+        /** Placeholder used for UI purposes */
+        continue;
+      }
+      if (serverName && options.req?.config?.mcpConfig?.[serverName] == null) {
+        logger.warn(
+          `MCP server "${serverName}" for "${toolName}" tool is not configured${agent?.id != null && agent.id ? ` but attached to "${agent.id}"` : ''}`,
+        );
+        continue;
+      }
       if (toolName === Constants.mcp_all) {
         const currentMCPGenerator = async (index) =>
           createMCPTools({
