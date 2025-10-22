@@ -3,11 +3,12 @@ export * from './azure';
 export * from './bedrock';
 export * from './config';
 export * from './file-config';
+/* messages  */
+export * from './messages';
 /* artifacts  */
 export * from './artifacts';
 /* schema helpers  */
 export * from './parsers';
-export * from './ocr';
 /* custom/dynamic configurations  */
 export * from './generate';
 export * from './models';

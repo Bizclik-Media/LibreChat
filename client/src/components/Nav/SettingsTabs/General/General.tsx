@@ -46,9 +46,11 @@ export const ThemeSelector = ({
     { value: 'light', label: localize('com_nav_theme_light') },
   ];
 
+  const labelId = 'theme-selector-label';
+
   return (
     <div className="flex items-center justify-between">
-      <div>{localize('com_nav_theme')}</div>
+      <div id={labelId}>{localize('com_nav_theme')}</div>
 
       <Dropdown
         value={theme}
@@ -57,6 +59,7 @@ export const ThemeSelector = ({
         sizeClasses="w-[180px]"
         testId="theme-selector"
         className="z-50"
+        aria-labelledby={labelId}
       />
     </div>
   );
@@ -107,13 +110,16 @@ export const LangSelector = ({
     { value: 'nl-NL', label: localize('com_nav_lang_dutch') },
     { value: 'id-ID', label: localize('com_nav_lang_indonesia') },
     { value: 'fi-FI', label: localize('com_nav_lang_finnish') },
+    { value: 'sl', label: localize('com_nav_lang_slovenian') },
     { value: 'bo', label: localize('com_nav_lang_tibetan') },
     { value: 'uk-UA', label: localize('com_nav_lang_ukrainian') },
   ];
 
+  const labelId = 'language-selector-label';
+
   return (
     <div className="flex items-center justify-between">
-      <div>{localize('com_nav_language')}</div>
+      <div id={labelId}>{localize('com_nav_language')}</div>
 
       <Dropdown
         value={langcode}
@@ -121,6 +127,7 @@ export const LangSelector = ({
         sizeClasses="[--anchor-max-height:256px]"
         options={languageOptions}
         className="z-50"
+        aria-labelledby={labelId}
       />
     </div>
   );
