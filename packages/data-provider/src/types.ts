@@ -1,13 +1,12 @@
 import type { InfiniteData } from '@tanstack/react-query';
 import type {
-  TBanner,
-  TMessage,
-  TResPlugin,
-  TSharedLink,
-  TConversation,
-  EModelEndpoint,
   TConversationTag,
+  EModelEndpoint,
+  TConversation,
+  TSharedLink,
   TAttachment,
+  TMessage,
+  TBanner,
 } from './schemas';
 import type { SettingDefinition } from './generate';
 import type { TMinimalFeedback } from './feedback';
@@ -110,6 +109,8 @@ export type TPayload = Partial<TMessage> &
     isTemporary: boolean;
     ephemeralAgent?: TEphemeralAgent | null;
     editedContent?: TEditedContent | null;
+    /** Added conversation for multi-convo feature */
+    addedConvo?: TConversation;
   };
 
 export type TEditedContent =
@@ -125,8 +126,6 @@ export type TEditedContent =
     };
 
 export type TSubmission = {
-  plugin?: TResPlugin;
-  plugins?: TResPlugin[];
   userMessage: TMessage;
   isEdited?: boolean;
   isContinued?: boolean;
@@ -139,6 +138,8 @@ export type TSubmission = {
   clientTimestamp?: string;
   ephemeralAgent?: TEphemeralAgent | null;
   editedContent?: TEditedContent | null;
+  /** Added conversation for multi-convo feature */
+  addedConvo?: TConversation;
 };
 
 export type EventSubmission = Omit<TSubmission, 'initialResponse'> & { initialResponse: TMessage };
@@ -347,7 +348,7 @@ export type TConfig = {
   capabilities?: string[];
   customParams?: {
     defaultParamsEndpoint?: string;
-    paramDefinitions?: SettingDefinition[];
+    paramDefinitions?: Partial<SettingDefinition>[];
   };
 };
 
@@ -536,8 +537,10 @@ export type TPromptsWithFilterRequest = {
 
 export type TPromptGroupsWithFilterRequest = {
   category: string;
-  pageNumber: string;
-  pageSize: string | number;
+  pageNumber?: string; // Made optional for cursor-based pagination
+  pageSize?: string | number;
+  limit?: string | number; // For cursor-based pagination
+  cursor?: string; // For cursor-based pagination
   before?: string | null;
   after?: string | null;
   order?: 'asc' | 'desc';
@@ -550,6 +553,8 @@ export type PromptGroupListResponse = {
   pageNumber: string;
   pageSize: string | number;
   pages: string | number;
+  has_more: boolean; // Added for cursor-based pagination
+  after: string | null; // Added for cursor-based pagination
 };
 
 export type PromptGroupListData = InfiniteData<PromptGroupListResponse>;

@@ -6,7 +6,6 @@ export interface IConversation extends Document {
   title?: string;
   user?: string;
   messages?: Types.ObjectId[];
-  agentOptions?: unknown;
   // Fields provided by conversationPreset (adjust types as needed)
   endpoint?: string;
   endpointType?: string;
@@ -50,6 +49,7 @@ export interface IConversation extends Document {
   useResponsesApi?: boolean;
   web_search?: boolean;
   disableStreaming?: boolean;
+  fileTokenLimit?: number;
   // Additional fields
   files?: string[];
   expiredAt?: Date;

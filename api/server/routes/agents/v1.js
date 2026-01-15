@@ -1,7 +1,7 @@
 const express = require('express');
 const { generateCheckAccess } = require('@librechat/api');
 const { PermissionTypes, Permissions, PermissionBits } = require('librechat-data-provider');
-const { requireJwtAuth, canAccessAgentResource } = require('~/server/middleware');
+const { requireJwtAuth, configMiddleware, canAccessAgentResource } = require('~/server/middleware');
 const v1 = require('~/server/controllers/agents/v1');
 const { getRoleByName } = require('~/models/Role');
 const actions = require('./actions');
@@ -25,7 +25,7 @@ const checkGlobalAgentShare = generateCheckAccess({
   permissionType: PermissionTypes.AGENTS,
   permissions: [Permissions.USE, Permissions.CREATE],
   bodyProps: {
-    [Permissions.SHARED_GLOBAL]: ['projectIds', 'removeProjectIds'],
+    [Permissions.SHARE]: ['projectIds', 'removeProjectIds'],
   },
   getRoleByName,
 });
@@ -36,13 +36,13 @@ router.use(requireJwtAuth);
  * Agent actions route.
  * @route GET|POST /agents/actions
  */
-router.use('/actions', actions);
+router.use('/actions', configMiddleware, actions);
 
 /**
  * Get a list of available tools for agents.
  * @route GET /agents/tools
  */
-router.use('/tools', tools);
+router.use('/tools', configMiddleware, tools);
 
 /**
  * Get all agent categories with counts
@@ -146,7 +146,15 @@ router.delete(
  * @param {number} req.body.version_index - Index of the version to revert to.
  * @returns {Agent} 200 - success response - application/json
  */
-router.post('/:id/revert', checkGlobalAgentShare, v1.revertAgentVersion);
+router.post(
+  '/:id/revert',
+  checkGlobalAgentShare,
+  canAccessAgentResource({
+    requiredPermission: PermissionBits.EDIT,
+    resourceIdParam: 'id',
+  }),
+  v1.revertAgentVersion,
+);
 
 /**
  * Returns a list of agents.

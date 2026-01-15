@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document } from 'mongoose';
+import { Schema, Document } from 'mongoose';
 import { conversationPreset } from './defaults';
 
 // @ts-ignore
@@ -51,8 +51,7 @@ export interface IPreset extends Document {
   useResponsesApi?: boolean;
   web_search?: boolean;
   disableStreaming?: boolean;
-  // end of additional fields
-  agentOptions?: unknown;
+  fileTokenLimit?: number;
 }
 
 const presetSchema: Schema<IPreset> = new Schema(
@@ -79,10 +78,6 @@ const presetSchema: Schema<IPreset> = new Schema(
       type: Number,
     },
     ...conversationPreset,
-    agentOptions: {
-      type: mongoose.Schema.Types.Mixed,
-      default: null,
-    },
   },
   { timestamps: true },
 );

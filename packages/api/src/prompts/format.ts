@@ -2,6 +2,7 @@ import { SystemCategories } from 'librechat-data-provider';
 import type { IPromptGroupDocument as IPromptGroup } from '@librechat/data-schemas';
 import type { Types } from 'mongoose';
 import type { PromptGroupsListResponse } from '~/types';
+import { escapeRegExp } from '~/utils/common';
 
 /**
  * Formats prompt groups for the paginated /groups endpoint response
@@ -21,9 +22,12 @@ export function formatPromptGroupsResponse({
   hasMore?: boolean;
   after?: string | null;
 }): PromptGroupsListResponse {
-  const effectivePageSize = parseInt(pageSize || '') || parseInt(String(actualLimit || '')) || 10;
-  const totalPages =
-    promptGroups.length > 0 ? Math.ceil(promptGroups.length / effectivePageSize).toString() : '0';
+  const currentPage = parseInt(pageNumber || '1');
+
+  // Calculate total pages based on whether there are more results
+  // If hasMore is true, we know there's at least one more page
+  // We use a high number (9999) to indicate "many pages" since we don't know the exact count
+  const totalPages = hasMore ? '9999' : currentPage.toString();
 
   return {
     promptGroups,
@@ -98,7 +102,6 @@ export function buildPromptGroupFilter({
 
   // Handle name filter - convert to regex for case-insensitive search
   if (name) {
-    const escapeRegExp = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     filter.name = new RegExp(escapeRegExp(name), 'i');
   }
 

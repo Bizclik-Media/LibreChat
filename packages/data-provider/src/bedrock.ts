@@ -37,6 +37,7 @@ export const bedrockInputSchema = s.tConversationSchema
     stop: true,
     thinking: true,
     thinkingBudget: true,
+    promptCache: true,
     /* Catch-all fields */
     topK: true,
     additionalModelRequestFields: true,
@@ -78,6 +79,7 @@ export const bedrockInputParser = s.tConversationSchema
     stop: true,
     thinking: true,
     thinkingBudget: true,
+    promptCache: true,
     /* Catch-all fields */
     topK: true,
     additionalModelRequestFields: true,
@@ -100,6 +102,7 @@ export const bedrockInputParser = s.tConversationSchema
       'temperature',
       'topP',
       'stop',
+      'promptCache',
     ];
 
     const additionalFields: Record<string, unknown> = {};
@@ -134,10 +137,21 @@ export const bedrockInputParser = s.tConversationSchema
       if (additionalFields.thinking === true && additionalFields.thinkingBudget === undefined) {
         additionalFields.thinkingBudget = 2000;
       }
-      additionalFields.anthropic_beta = ['output-128k-2025-02-19'];
+      if (typedData.model.includes('anthropic.')) {
+        additionalFields.anthropic_beta = ['output-128k-2025-02-19'];
+      }
     } else if (additionalFields.thinking != null || additionalFields.thinkingBudget != null) {
       delete additionalFields.thinking;
       delete additionalFields.thinkingBudget;
+    }
+
+    /** Default promptCache for claude and nova models, if not defined */
+    if (
+      typeof typedData.model === 'string' &&
+      (typedData.model.includes('claude') || typedData.model.includes('nova')) &&
+      typedData.promptCache === undefined
+    ) {
+      typedData.promptCache = true;
     }
 
     if (Object.keys(additionalFields).length > 0) {

@@ -1,16 +1,18 @@
 const fs = require('fs').promises;
 const express = require('express');
 const { EnvVar } = require('@librechat/agents');
+const { logger } = require('@librechat/data-schemas');
 const {
   Time,
   isUUID,
   CacheKeys,
   FileSources,
+  SystemRoles,
   ResourceType,
   EModelEndpoint,
   PermissionBits,
-  isAgentsEndpoint,
   checkOpenAIStorage,
+  isAssistantsEndpoint,
 } = require('librechat-data-provider');
 const {
   filterFile,
@@ -25,19 +27,20 @@ const { checkPermission } = require('~/server/services/PermissionService');
 const { loadAuthValues } = require('~/server/services/Tools/credentials');
 const { refreshS3FileUrls } = require('~/server/services/Files/S3/crud');
 const { hasAccessToFilesViaAgent } = require('~/server/services/Files');
-const { getFiles, batchUpdateFiles } = require('~/models/File');
+const { getFiles, batchUpdateFiles } = require('~/models');
 const { cleanFileName } = require('~/server/utils/files');
 const { getAssistant } = require('~/models/Assistant');
 const { getAgent } = require('~/models/Agent');
 const { getLogStores } = require('~/cache');
-const { logger } = require('~/config');
+const { Readable } = require('stream');
 
 const router = express.Router();
 
 router.get('/', async (req, res) => {
   try {
+    const appConfig = req.config;
     const files = await getFiles({ user: req.user.id });
-    if (req.app.locals.fileStrategy === FileSources.s3) {
+    if (appConfig.fileStrategy === FileSources.s3) {
       try {
         const cache = getLogStores(CacheKeys.S3_EXPIRY_INTERVAL);
         const alreadyChecked = await cache.get(req.user.id);
@@ -114,7 +117,8 @@ router.get('/agent/:agent_id', async (req, res) => {
 
 router.get('/config', async (req, res) => {
   try {
-    res.status(200).json(req.app.locals.fileConfig);
+    const appConfig = req.config;
+    res.status(200).json(appConfig.fileConfig);
   } catch (error) {
     logger.error('[/files] Error getting fileConfig', error);
     res.status(400).json({ message: 'Error in request', error: error.message });
@@ -182,6 +186,7 @@ router.delete('/', async (req, res) => {
         role: req.user.role,
         fileIds: nonOwnedFileIds,
         agentId: req.body.agent_id,
+        isDelete: true,
       });
 
       for (const file of nonOwnedFiles) {
@@ -323,11 +328,6 @@ router.get('/download/:userId/:file_id', fileAccess, async (req, res) => {
       res.setHeader('X-File-Metadata', JSON.stringify(file));
     };
 
-    /** @type {{ body: import('stream').PassThrough } | undefined} */
-    let passThrough;
-    /** @type {ReadableStream | undefined} */
-    let fileStream;
-
     if (checkOpenAIStorage(file.source)) {
       req.body = { model: file.model };
       const endpointMap = {
@@ -340,12 +340,19 @@ router.get('/download/:userId/:file_id', fileAccess, async (req, res) => {
         overrideEndpoint: endpointMap[file.source],
       });
       logger.debug(`Downloading file ${file_id} from OpenAI`);
-      passThrough = await getDownloadStream(file_id, openai);
+      const passThrough = await getDownloadStream(file_id, openai);
       setHeaders();
       logger.debug(`File ${file_id} downloaded from OpenAI`);
-      passThrough.body.pipe(res);
+
+      // Handle both Node.js and Web streams
+      const stream =
+        passThrough.body && typeof passThrough.body.getReader === 'function'
+          ? Readable.fromWeb(passThrough.body)
+          : passThrough.body;
+
+      stream.pipe(res);
     } else {
-      fileStream = await getDownloadStream(req, file.filepath);
+      const fileStream = await getDownloadStream(req, file.filepath);
 
       fileStream.on('error', (streamError) => {
         logger.error('[DOWNLOAD ROUTE] Stream error:', streamError);
@@ -370,11 +377,55 @@ router.post('/', async (req, res) => {
     metadata.temp_file_id = metadata.file_id;
     metadata.file_id = req.file_id;
 
-    if (isAgentsEndpoint(metadata.endpoint)) {
-      return await processAgentFileUpload({ req, res, metadata });
+    if (isAssistantsEndpoint(metadata.endpoint)) {
+      return await processFileUpload({ req, res, metadata });
     }
 
-    await processFileUpload({ req, res, metadata });
+    /**
+     * Check agent permissions for permanent agent file uploads (not message attachments).
+     * Message attachments (message_file=true) are temporary files for a single conversation
+     * and should be allowed for users who can chat with the agent.
+     * Permanent file uploads to tool_resources require EDIT permission.
+     */
+    const isMessageAttachment = metadata.message_file === true || metadata.message_file === 'true';
+    if (metadata.agent_id && metadata.tool_resource && !isMessageAttachment) {
+      const userId = req.user.id;
+
+      /** Admin users bypass permission checks */
+      if (req.user.role !== SystemRoles.ADMIN) {
+        const agent = await getAgent({ id: metadata.agent_id });
+
+        if (!agent) {
+          return res.status(404).json({
+            error: 'Not Found',
+            message: 'Agent not found',
+          });
+        }
+
+        /** Check if user is the author or has edit permission */
+        if (agent.author.toString() !== userId) {
+          const hasEditPermission = await checkPermission({
+            userId,
+            role: req.user.role,
+            resourceType: ResourceType.AGENT,
+            resourceId: agent._id,
+            requiredPermission: PermissionBits.EDIT,
+          });
+
+          if (!hasEditPermission) {
+            logger.warn(
+              `[/files] User ${userId} denied upload to agent ${metadata.agent_id} (insufficient permissions)`,
+            );
+            return res.status(403).json({
+              error: 'Forbidden',
+              message: 'Insufficient permissions to upload files to this agent',
+            });
+          }
+        }
+      }
+    }
+
+    return await processAgentFileUpload({ req, res, metadata });
   } catch (error) {
     let message = 'Error processing file';
     logger.error('[/files] Error processing file:', error);
@@ -385,7 +436,8 @@ router.post('/', async (req, res) => {
 
     if (
       error.message?.includes('Invalid file format') ||
-      error.message?.includes('No OCR result')
+      error.message?.includes('No OCR result') ||
+      error.message?.includes('exceeds token limit')
     ) {
       message = error.message;
     }

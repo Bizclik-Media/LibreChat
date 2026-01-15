@@ -8,6 +8,7 @@ process.env.CREDS_IV = '0123456789abcdef';
 
 jest.mock('~/server/services/Config', () => ({
   getCachedTools: jest.fn(),
+  getMCPServerTools: jest.fn(),
 }));
 
 const mongoose = require('mongoose');
@@ -30,7 +31,7 @@ const {
   generateActionMetadataHash,
 } = require('./Agent');
 const permissionService = require('~/server/services/PermissionService');
-const { getCachedTools } = require('~/server/services/Config');
+const { getCachedTools, getMCPServerTools } = require('~/server/services/Config');
 const { AclEntry } = require('~/db/models');
 
 /**
@@ -529,6 +530,49 @@ describe('models/Agent', () => {
         resourceId: agent._id,
       });
       expect(aclEntriesAfter).toHaveLength(0);
+    });
+
+    test('should remove handoff edges referencing deleted agent from other agents', async () => {
+      const authorId = new mongoose.Types.ObjectId();
+      const targetAgentId = `agent_${uuidv4()}`;
+      const sourceAgentId = `agent_${uuidv4()}`;
+
+      // Create target agent (handoff destination)
+      await createAgent({
+        id: targetAgentId,
+        name: 'Target Agent',
+        provider: 'test',
+        model: 'test-model',
+        author: authorId,
+      });
+
+      // Create source agent with handoff edge to target
+      await createAgent({
+        id: sourceAgentId,
+        name: 'Source Agent',
+        provider: 'test',
+        model: 'test-model',
+        author: authorId,
+        edges: [
+          {
+            from: sourceAgentId,
+            to: targetAgentId,
+            edgeType: 'handoff',
+          },
+        ],
+      });
+
+      // Verify edge exists before deletion
+      const sourceAgentBefore = await getAgent({ id: sourceAgentId });
+      expect(sourceAgentBefore.edges).toHaveLength(1);
+      expect(sourceAgentBefore.edges[0].to).toBe(targetAgentId);
+
+      // Delete the target agent
+      await deleteAgent({ id: targetAgentId });
+
+      // Verify the edge is removed from source agent
+      const sourceAgentAfter = await getAgent({ id: sourceAgentId });
+      expect(sourceAgentAfter.edges).toHaveLength(0);
     });
 
     test('should list agents by author', async () => {
@@ -1929,6 +1973,16 @@ describe('models/Agent', () => {
         another_tool: {},
       });
 
+      // Mock getMCPServerTools to return tools for each server
+      getMCPServerTools.mockImplementation(async (_userId, server) => {
+        if (server === 'server1') {
+          return { tool1_mcp_server1: {} };
+        } else if (server === 'server2') {
+          return { tool2_mcp_server2: {} };
+        }
+        return null;
+      });
+
       const mockReq = {
         user: { id: 'user123' },
         body: {
@@ -1949,7 +2003,8 @@ describe('models/Agent', () => {
       });
 
       if (result) {
-        expect(result.id).toBe(EPHEMERAL_AGENT_ID);
+        // Ephemeral agent ID is encoded with endpoint and model
+        expect(result.id).toBe('openai__gpt-4');
         expect(result.instructions).toBe('Test instructions');
         expect(result.provider).toBe('openai');
         expect(result.model).toBe('gpt-4');
@@ -1967,7 +2022,7 @@ describe('models/Agent', () => {
       const mockReq = { user: { id: 'user123' } };
       const result = await loadAgent({
         req: mockReq,
-        agent_id: 'non_existent_agent',
+        agent_id: 'agent_non_existent',
         endpoint: 'openai',
         model_parameters: { model: 'gpt-4' },
       });
@@ -2094,7 +2149,7 @@ describe('models/Agent', () => {
       test('should handle loadAgent with malformed req object', async () => {
         const result = await loadAgent({
           req: null,
-          agent_id: 'test',
+          agent_id: 'agent_test',
           endpoint: 'openai',
           model_parameters: { model: 'gpt-4' },
         });
@@ -2112,6 +2167,14 @@ describe('models/Agent', () => {
         }, {});
 
         getCachedTools.mockResolvedValue(availableTools);
+
+        // Mock getMCPServerTools to return all tools for server1
+        getMCPServerTools.mockImplementation(async (_userId, server) => {
+          if (server === 'server1') {
+            return availableTools; // All 100 tools belong to server1
+          }
+          return null;
+        });
 
         const mockReq = {
           user: { id: 'user123' },
@@ -2652,6 +2715,17 @@ describe('models/Agent', () => {
         tool__server1: {}, // Wrong delimiter
         tool_mcp_server1: {}, // Correct format
         tool_mcp_server2: {}, // Different server
+      });
+
+      // Mock getMCPServerTools to return only tools matching the server
+      getMCPServerTools.mockImplementation(async (_userId, server) => {
+        if (server === 'server1') {
+          // Only return tool that correctly matches server1 format
+          return { tool_mcp_server1: {} };
+        } else if (server === 'server2') {
+          return { tool_mcp_server2: {} };
+        }
+        return null;
       });
 
       const mockReq = {
