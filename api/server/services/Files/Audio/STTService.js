@@ -3,7 +3,8 @@ const fs = require('fs').promises;
 const FormData = require('form-data');
 const { Readable } = require('stream');
 const { logger } = require('@librechat/data-schemas');
-const { genAzureEndpoint } = require('@librechat/api');
+const { HttpsProxyAgent } = require('https-proxy-agent');
+const { genAzureEndpoint, logAxiosError } = require('@librechat/api');
 const { extractEnvVariable, STTProviders } = require('librechat-data-provider');
 const { getAppConfig } = require('~/server/services/Config');
 
@@ -33,6 +34,34 @@ const MIME_TO_EXTENSION_MAP = {
   'audio/flac': 'flac',
   'audio/x-flac': 'flac',
 };
+
+/**
+ * Validates and extracts ISO-639-1 language code from a locale string.
+ * @param {string} language - The language/locale string (e.g., "en-US", "en", "zh-CN")
+ * @returns {string|null} The ISO-639-1 language code (e.g., "en") or null if invalid
+ */
+function getValidatedLanguageCode(language) {
+  try {
+    if (!language) {
+      return null;
+    }
+
+    const normalizedLanguage = language.toLowerCase();
+    const isValidLocaleCode = /^[a-z]{2}(-[a-z]{2})?$/.test(normalizedLanguage);
+
+    if (isValidLocaleCode) {
+      return normalizedLanguage.split('-')[0];
+    }
+
+    logger.warn(
+      `[STT] Invalid language format "${language}". Expected ISO-639-1 locale code like "en-US" or "en". Skipping language parameter.`,
+    );
+    return null;
+  } catch (error) {
+    logger.error(`[STT] Error validating language code "${language}":`, error);
+    return null;
+  }
+}
 
 /**
  * Gets the file extension from the MIME type.
@@ -113,6 +142,7 @@ class STTService {
       req.config ??
       (await getAppConfig({
         role: req?.user?.role,
+        tenantId: req?.user?.tenantId,
       }));
     const sttSchema = appConfig?.speech?.stt;
     if (!sttSchema) {
@@ -172,10 +202,9 @@ class STTService {
       model: sttSchema.model,
     };
 
-    if (language) {
-      /** Converted locale code (e.g., "en-US") to ISO-639-1 format (e.g., "en") */
-      const isoLanguage = language.split('-')[0];
-      data.language = isoLanguage;
+    const validLanguage = getValidatedLanguageCode(language);
+    if (validLanguage) {
+      data.language = validLanguage;
     }
 
     const headers = {
@@ -209,9 +238,15 @@ class STTService {
     }
 
     const acceptedFormats = ['flac', 'mp3', 'mp4', 'mpeg', 'mpga', 'm4a', 'ogg', 'wav', 'webm'];
-    const fileFormat = audioFile.mimetype.split('/')[1];
-    if (!acceptedFormats.includes(fileFormat)) {
-      throw new Error(`The audio file format ${fileFormat} is not accepted`);
+    const [mimePrefix, rawFormat = ''] = audioFile.mimetype.split('/');
+    const isAudioMime = mimePrefix === 'audio' || mimePrefix === 'video';
+    const isKnownMime = audioFile.mimetype in MIME_TO_EXTENSION_MAP;
+    const normalizedFormat = isKnownMime ? MIME_TO_EXTENSION_MAP[audioFile.mimetype] : null;
+    if (
+      !acceptedFormats.includes(normalizedFormat) &&
+      !(isAudioMime && acceptedFormats.includes(rawFormat))
+    ) {
+      throw new Error(`The audio file format ${rawFormat} is not accepted`);
     }
 
     const formData = new FormData();
@@ -220,14 +255,12 @@ class STTService {
       contentType: audioFile.mimetype,
     });
 
-    if (language) {
-      /** Converted locale code (e.g., "en-US") to ISO-639-1 format (e.g., "en") */
-      const isoLanguage = language.split('-')[0];
-      formData.append('language', isoLanguage);
+    const validLanguage = getValidatedLanguageCode(language);
+    if (validLanguage) {
+      formData.append('language', validLanguage);
     }
 
     const headers = {
-      'Content-Type': 'multipart/form-data',
       ...(apiKey && { 'api-key': apiKey }),
     };
 
@@ -267,8 +300,14 @@ class STTService {
       language,
     );
 
+    const options = { headers };
+
+    if (process.env.PROXY) {
+      options.httpsAgent = new HttpsProxyAgent(process.env.PROXY);
+    }
+
     try {
-      const response = await axios.post(url, data, { headers });
+      const response = await axios.post(url, data, options);
 
       if (response.status !== 200) {
         throw new Error('Invalid response from the STT API');
@@ -280,7 +319,7 @@ class STTService {
 
       return response.data.text.trim();
     } catch (error) {
-      logger.error(`STT request failed for provider ${provider}:`, error);
+      logAxiosError({ message: `STT request failed for provider ${provider}:`, error });
       throw error;
     }
   }
@@ -310,7 +349,7 @@ class STTService {
       const text = await this.sttRequest(provider, sttSchema, { audioBuffer, audioFile, language });
       res.json({ text });
     } catch (error) {
-      logger.error('An error occurred while processing the audio:', error);
+      logAxiosError({ message: 'An error occurred while processing the audio:', error });
       res.sendStatus(500);
     } finally {
       try {
@@ -344,4 +383,4 @@ async function speechToText(req, res) {
   await sttService.processSpeechToText(req, res);
 }
 
-module.exports = { STTService, speechToText };
+module.exports = { STTService, speechToText, getFileExtensionFromMime, MIME_TO_EXTENSION_MAP };

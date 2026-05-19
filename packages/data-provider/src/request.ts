@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import axios, { AxiosError, AxiosRequestConfig } from 'axios';
-import * as endpoints from './api-endpoints';
 import { setTokenHeader } from './headers-helpers';
+import * as endpoints from './api-endpoints';
 import type * as t from './types';
 
 async function _get<T>(url: string, options?: AxiosRequestConfig): Promise<T> {
@@ -98,10 +98,13 @@ if (typeof window !== 'undefined') {
       if (originalRequest.url?.includes('/api/auth/logout') === true) {
         return Promise.reject(error);
       }
-      if (originalRequest.url?.includes('/api/auth/refresh') === true) {
-        // Refresh token itself failed - redirect to login
-        console.log('Refresh token request failed, redirecting to login...');
-        window.location.href = '/login';
+
+      /** Skip refresh when the Authorization header has been cleared (e.g. during logout),
+       *  but allow shared link requests to proceed so auth recovery/redirect can happen */
+      if (
+        !axios.defaults.headers.common['Authorization'] &&
+        !window.location.pathname.startsWith('/share/')
+      ) {
         return Promise.reject(error);
       }
 
@@ -124,7 +127,10 @@ if (typeof window !== 'undefined') {
         isRefreshing = true;
 
         try {
-          const response = await refreshToken();
+          const response = await refreshToken(
+            // Handle edge case where we get a blank screen if the initial 401 error is from a refresh token request
+            originalRequest.url?.includes('api/auth/refresh') === true ? true : false,
+          );
 
           const token = response?.token ?? '';
 
@@ -133,12 +139,9 @@ if (typeof window !== 'undefined') {
             dispatchTokenUpdatedEvent(token);
             processQueue(null, token);
             return await axios(originalRequest);
-          } else if (window.location.href.includes('share/')) {
-            console.log(
-              `Refresh token failed from shared link, attempting request to ${originalRequest.url}`,
-            );
           } else {
-            window.location.href = '/login';
+            processQueue(error, null);
+            window.location.href = endpoints.apiBaseUrl() + endpoints.buildLoginRedirectUrl();
           }
         } catch (err) {
           processQueue(err as AxiosError, null);

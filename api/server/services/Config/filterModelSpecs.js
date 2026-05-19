@@ -1,8 +1,5 @@
-const jwt = require('jsonwebtoken');
-const { ExtractJwt } = require('passport-jwt');
 const { isAgentsEndpoint, ResourceType, PermissionBits, Time, CacheKeys } = require('librechat-data-provider');
 const { findAccessibleResources } = require('~/server/services/PermissionService');
-const { getUserById } = require('~/models');
 const { Agent } = require('~/db/models');
 const { getLogStores } = require('~/cache');
 const { logger } = require('@librechat/data-schemas');
@@ -15,37 +12,31 @@ const { logger } = require('@librechat/data-schemas');
  */
 async function filterModelSpecsByPermissions(req, modelSpecs) {
   if (!modelSpecs?.list) {
-    logger.debug('[filterModelSpecs] No modelSpecs.list found, returning unchanged');
     return modelSpecs;
   }
 
-  // Extract JWT token and get user
-  const token = ExtractJwt.fromAuthHeaderAsBearerToken()(req);
-  if (!token) {
-    logger.debug('[filterModelSpecs] No JWT token found, returning unchanged');
+  // The /api/config authenticated branch in v0.8.5 runs under the JWT middleware
+  // chain, so req.user is populated. If for some reason it isn't, return unchanged
+  // rather than over-filter.
+  const userId = req.user?.id ?? req.user?._id?.toString();
+  if (!userId) {
+    logger.debug('[filterModelSpecs] No req.user found, returning unchanged');
     return modelSpecs;
   }
 
-  let user;
-  try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
-    logger.debug(`[filterModelSpecs] JWT payload:`, payload);
-    user = await getUserById(payload.id, '-password -__v -totpSecret -backupCodes');
-    if (!user) {
-      logger.debug('[filterModelSpecs] User not found, returning unchanged');
-      return modelSpecs;
-    }
-  } catch (err) {
-    logger.debug('[filterModelSpecs] JWT verification failed, returning unchanged');
-    return modelSpecs;
-  }
+  const role = req.user.role;
+  const tenantId = req.user.tenantId;
+  logger.debug(
+    `[filterModelSpecs] Filtering ${modelSpecs.list.length} ModelSpecs for user ${userId}` +
+      (tenantId ? ` (tenant ${tenantId})` : ''),
+  );
 
-  const userId = user._id.toString();
-  logger.debug(`[filterModelSpecs] Filtering ${modelSpecs.list.length} ModelSpecs for user ${userId}`);
-
-  // Check per-user cache first
+  // Per-user (and per-tenant when present) cache key avoids cross-user leakage
+  // and isolates between tenants now that v0.8.5 threads tenantId through getAppConfig.
   const cache = getLogStores(CacheKeys.CONFIG_STORE);
-  const userCacheKey = `FILTERED_MODELSPECS_${userId}`;
+  const userCacheKey = tenantId
+    ? `FILTERED_MODELSPECS_${tenantId}_${userId}`
+    : `FILTERED_MODELSPECS_${userId}`;
   const cachedFiltered = await cache.get(userCacheKey);
 
   if (cachedFiltered) {
@@ -53,10 +44,10 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
     return cachedFiltered;
   }
 
-  // Get agent IDs the user has VIEW access to via ACL (these are MongoDB ObjectIds)
+  // Agent IDs the user has VIEW access to via ACL (returned as MongoDB ObjectIds)
   const accessibleAgentIds = await findAccessibleResources({
     userId,
-    role: user.role,
+    role,
     resourceType: ResourceType.AGENT,
     requiredPermissions: PermissionBits.VIEW,
   });
