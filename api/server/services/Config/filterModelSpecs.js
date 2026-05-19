@@ -1,7 +1,6 @@
-const { isAgentsEndpoint, ResourceType, PermissionBits, Time, CacheKeys } = require('librechat-data-provider');
+const { isAgentsEndpoint, ResourceType, PermissionBits } = require('librechat-data-provider');
 const { findAccessibleResources } = require('~/server/services/PermissionService');
 const { Agent } = require('~/db/models');
-const { getLogStores } = require('~/cache');
 const { logger } = require('@librechat/data-schemas');
 
 /**
@@ -25,24 +24,7 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
   }
 
   const role = req.user.role;
-  const tenantId = req.user.tenantId;
-  logger.debug(
-    `[filterModelSpecs] Filtering ${modelSpecs.list.length} ModelSpecs for user ${userId}` +
-      (tenantId ? ` (tenant ${tenantId})` : ''),
-  );
-
-  // Per-user (and per-tenant when present) cache key avoids cross-user leakage
-  // and isolates between tenants now that v0.8.5 threads tenantId through getAppConfig.
-  const cache = getLogStores(CacheKeys.CONFIG_STORE);
-  const userCacheKey = tenantId
-    ? `FILTERED_MODELSPECS_${tenantId}_${userId}`
-    : `FILTERED_MODELSPECS_${userId}`;
-  const cachedFiltered = await cache.get(userCacheKey);
-
-  if (cachedFiltered) {
-    logger.debug(`[filterModelSpecs] Using cached filtered ModelSpecs for user ${userId}`);
-    return cachedFiltered;
-  }
+  logger.debug(`[filterModelSpecs] Filtering ${modelSpecs.list.length} ModelSpecs for user ${userId}`);
 
   // Agent IDs the user has VIEW access to via ACL (returned as MongoDB ObjectIds)
   const accessibleAgentIds = await findAccessibleResources({
@@ -94,16 +76,10 @@ async function filterModelSpecsByPermissions(req, modelSpecs) {
 
   logger.debug(`[filterModelSpecs] Filtered from ${modelSpecs.list.length} to ${filteredList.length} ModelSpecs`);
 
-  const filteredResult = {
+  return {
     ...modelSpecs,
     list: filteredList,
   };
-
-  // Cache the filtered result for this user (10 minutes TTL)
-  await cache.set(userCacheKey, filteredResult, Time.TEN_MINUTES);
-  logger.debug(`[filterModelSpecs] Cached filtered ModelSpecs for user ${userId} for 10 minutes`);
-
-  return filteredResult;
 }
 
 module.exports = { filterModelSpecsByPermissions };
