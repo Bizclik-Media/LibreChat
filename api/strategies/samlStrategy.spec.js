@@ -287,18 +287,31 @@ u7wlOSk+oFzDIO/UILIA
     await setupSaml();
   });
 
-  it('should configure SAML strategy with disableRequestedAuthnContext enabled by default', async () => {
-    expect(samlOptions.disableRequestedAuthnContext).toBe(true);
+  it('should not set disableRequestedAuthnContext or authnContext by default', async () => {
+    expect(samlOptions.disableRequestedAuthnContext).toBeUndefined();
+    expect(samlOptions.authnContext).toBeUndefined();
   });
 
-  it('should allow disableRequestedAuthnContext to be disabled via environment variable', async () => {
-    process.env.SAML_DISABLE_REQUESTED_AUTHN_CONTEXT = 'false';
-    // Reset so the mock re-captures options for the regular (non-admin) callback on this setupSaml() call
+  it('should set disableRequestedAuthnContext when SAML_DISABLE_REQUESTED_AUTHN_CONTEXT=true', async () => {
+    process.env.SAML_DISABLE_REQUESTED_AUTHN_CONTEXT = 'true';
     verifyCallback = null;
     samlOptions = null;
     await setupSaml();
-    expect(samlOptions.disableRequestedAuthnContext).toBe(false);
+    expect(samlOptions.disableRequestedAuthnContext).toBe(true);
     delete process.env.SAML_DISABLE_REQUESTED_AUTHN_CONTEXT;
+  });
+
+  it('should parse SAML_AUTHN_CONTEXT into a trimmed array of class refs', async () => {
+    process.env.SAML_AUTHN_CONTEXT =
+      'urn:oasis:names:tc:SAML:2.0:ac:classes:Unspecified, urn:oasis:names:tc:SAML:2.0:ac:classes:Password';
+    verifyCallback = null;
+    samlOptions = null;
+    await setupSaml();
+    expect(samlOptions.authnContext).toEqual([
+      'urn:oasis:names:tc:SAML:2.0:ac:classes:Unspecified',
+      'urn:oasis:names:tc:SAML:2.0:ac:classes:Password',
+    ]);
+    delete process.env.SAML_AUTHN_CONTEXT;
   });
 
   it('should create a new user with correct username when username claim exists', async () => {
