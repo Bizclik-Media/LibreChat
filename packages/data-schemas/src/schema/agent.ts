@@ -5,8 +5,6 @@ const agentSchema = new Schema<IAgent>(
   {
     id: {
       type: String,
-      index: true,
-      unique: true,
       required: true,
     },
     name: {
@@ -68,12 +66,13 @@ const agentSchema = new Schema<IAgent>(
     end_after_tools: {
       type: Boolean,
     },
+    /** @deprecated Use edges instead */
     agent_ids: {
       type: [String],
     },
-    isCollaborative: {
-      type: Boolean,
-      default: undefined,
+    edges: {
+      type: [{ type: Schema.Types.Mixed }],
+      default: [],
     },
     conversation_starters: {
       type: [String],
@@ -82,11 +81,6 @@ const agentSchema = new Schema<IAgent>(
     tool_resources: {
       type: Schema.Types.Mixed,
       default: {},
-    },
-    projectIds: {
-      type: [Schema.Types.ObjectId],
-      ref: 'Project',
-      index: true,
     },
     versions: {
       type: [Schema.Types.Mixed],
@@ -107,12 +101,29 @@ const agentSchema = new Schema<IAgent>(
       default: false,
       index: true,
     },
+    /** MCP server names extracted from tools for efficient querying */
+    mcpServerNames: {
+      type: [String],
+      default: [],
+      index: true,
+    },
+    /** Per-tool configuration (defer_loading, allowed_callers) */
+    tool_options: {
+      type: Schema.Types.Mixed,
+      default: undefined,
+    },
+    tenantId: {
+      type: String,
+      index: true,
+    },
   },
   {
     timestamps: true,
   },
 );
 
+agentSchema.index({ id: 1, tenantId: 1 }, { unique: true });
 agentSchema.index({ updatedAt: -1, _id: 1 });
+agentSchema.index({ 'edges.to': 1 });
 
 export default agentSchema;

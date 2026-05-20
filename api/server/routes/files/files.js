@@ -1,6 +1,12 @@
 const fs = require('fs').promises;
 const express = require('express');
 const { EnvVar } = require('@librechat/agents');
+const { logger, SystemCapabilities } = require('@librechat/data-schemas');
+const {
+  refreshS3FileUrls,
+  resolveUploadErrorMessage,
+  verifyAgentUploadPermission,
+} = require('@librechat/api');
 const {
   Time,
   isUUID,
@@ -9,8 +15,8 @@ const {
   ResourceType,
   EModelEndpoint,
   PermissionBits,
-  isAgentsEndpoint,
   checkOpenAIStorage,
+  isAssistantsEndpoint,
 } = require('librechat-data-provider');
 const {
   filterFile,
@@ -21,30 +27,27 @@ const {
 const { fileAccess } = require('~/server/middleware/accessResources/fileAccess');
 const { getStrategyFunctions } = require('~/server/services/Files/strategies');
 const { getOpenAIClient } = require('~/server/controllers/assistants/helpers');
+const { hasCapability } = require('~/server/middleware/roles/capabilities');
 const { checkPermission } = require('~/server/services/PermissionService');
 const { loadAuthValues } = require('~/server/services/Tools/credentials');
-const { refreshS3FileUrls } = require('~/server/services/Files/S3/crud');
 const { hasAccessToFilesViaAgent } = require('~/server/services/Files');
-const { getFiles, batchUpdateFiles } = require('~/models/File');
 const { cleanFileName } = require('~/server/utils/files');
-const { getAssistant } = require('~/models/Assistant');
-const { getAgent } = require('~/models/Agent');
 const { getLogStores } = require('~/cache');
-const { logger } = require('~/config');
 const { Readable } = require('stream');
+const db = require('~/models');
 
 const router = express.Router();
 
 router.get('/', async (req, res) => {
   try {
     const appConfig = req.config;
-    const files = await getFiles({ user: req.user.id });
+    const files = await db.getFiles({ user: req.user.id });
     if (appConfig.fileStrategy === FileSources.s3) {
       try {
         const cache = getLogStores(CacheKeys.S3_EXPIRY_INTERVAL);
         const alreadyChecked = await cache.get(req.user.id);
         if (!alreadyChecked) {
-          await refreshS3FileUrls(files, batchUpdateFiles);
+          await refreshS3FileUrls(files, db.batchUpdateFiles);
           await cache.set(req.user.id, true, Time.THIRTY_MINUTES);
         }
       } catch (error) {
@@ -73,7 +76,7 @@ router.get('/agent/:agent_id', async (req, res) => {
       return res.status(400).json({ error: 'Agent ID is required' });
     }
 
-    const agent = await getAgent({ id: agent_id });
+    const agent = await db.getAgent({ id: agent_id });
     if (!agent) {
       return res.status(200).json([]);
     }
@@ -105,7 +108,7 @@ router.get('/agent/:agent_id', async (req, res) => {
       return res.status(200).json([]);
     }
 
-    const files = await getFiles({ file_id: { $in: agentFileIds } }, null, { text: 0 });
+    const files = await db.getFiles({ file_id: { $in: agentFileIds } }, null, { text: 0 });
 
     res.status(200).json(files);
   } catch (error) {
@@ -150,7 +153,7 @@ router.delete('/', async (req, res) => {
     }
 
     const fileIds = files.map((file) => file.file_id);
-    const dbFiles = await getFiles({ file_id: { $in: fileIds } });
+    const dbFiles = await db.getFiles({ file_id: { $in: fileIds } });
 
     const ownedFiles = [];
     const nonOwnedFiles = [];
@@ -208,7 +211,7 @@ router.delete('/', async (req, res) => {
 
     /* Handle agent unlinking even if no valid files to delete */
     if (req.body.agent_id && req.body.tool_resource && dbFiles.length === 0) {
-      const agent = await getAgent({
+      const agent = await db.getAgent({
         id: req.body.agent_id,
       });
 
@@ -222,7 +225,7 @@ router.delete('/', async (req, res) => {
 
     /* Handle assistant unlinking even if no valid files to delete */
     if (req.body.assistant_id && req.body.tool_resource && dbFiles.length === 0) {
-      const assistant = await getAssistant({
+      const assistant = await db.getAssistant({
         id: req.body.assistant_id,
       });
 
@@ -376,26 +379,34 @@ router.post('/', async (req, res) => {
     metadata.temp_file_id = metadata.file_id;
     metadata.file_id = req.file_id;
 
-    if (isAgentsEndpoint(metadata.endpoint)) {
-      return await processAgentFileUpload({ req, res, metadata });
+    if (isAssistantsEndpoint(metadata.endpoint)) {
+      return await processFileUpload({ req, res, metadata });
     }
 
-    await processFileUpload({ req, res, metadata });
+    let skipUploadAuth = false;
+    try {
+      skipUploadAuth = await hasCapability(req.user, SystemCapabilities.MANAGE_AGENTS);
+    } catch (err) {
+      logger.warn(`[/files] capability check failed, denying bypass: ${err.message}`);
+    }
+
+    if (!skipUploadAuth) {
+      const denied = await verifyAgentUploadPermission({
+        req,
+        res,
+        metadata,
+        getAgent: db.getAgent,
+        checkPermission,
+      });
+      if (denied) {
+        return;
+      }
+    }
+
+    return await processAgentFileUpload({ req, res, metadata });
   } catch (error) {
-    let message = 'Error processing file';
+    const message = resolveUploadErrorMessage(error);
     logger.error('[/files] Error processing file:', error);
-
-    if (error.message?.includes('file_ids')) {
-      message += ': ' + error.message;
-    }
-
-    if (
-      error.message?.includes('Invalid file format') ||
-      error.message?.includes('No OCR result') ||
-      error.message?.includes('exceeds token limit')
-    ) {
-      message = error.message;
-    }
 
     try {
       await fs.unlink(req.file.path);

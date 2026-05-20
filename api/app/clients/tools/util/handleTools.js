@@ -1,15 +1,25 @@
 const { logger } = require('@librechat/data-schemas');
-const { SerpAPI } = require('@langchain/community/tools/serpapi');
-const { Calculator } = require('@langchain/community/tools/calculator');
-const { mcpToolPattern, loadWebSearchAuth, checkAccess } = require('@librechat/api');
-const { EnvVar, createCodeExecutionTool, createSearchTool } = require('@librechat/agents');
+const {
+  EnvVar,
+  Calculator,
+  createSearchTool,
+  createCodeExecutionTool,
+} = require('@librechat/agents');
+const {
+  checkAccess,
+  toolkitParent,
+  createSafeUser,
+  mcpToolPattern,
+  loadWebSearchAuth,
+  buildImageToolContext,
+  buildWebSearchContext,
+} = require('@librechat/api');
 const {
   Tools,
   Constants,
   Permissions,
   EToolResources,
   PermissionTypes,
-  replaceSpecialVars,
 } = require('librechat-data-provider');
 const {
   availableTools,
@@ -24,17 +34,18 @@ const {
   StructuredACS,
   TraversaalSearch,
   StructuredWolfram,
-  createYouTubeTools,
   TavilySearchResults,
+  createGeminiImageTool,
   createOpenAIImageTools,
 } = require('../');
-const { primeFiles: primeCodeFiles } = require('~/server/services/Files/Code/process');
+const { createMCPTool, createMCPTools, resolveConfigServers } = require('~/server/services/MCP');
 const { createFileSearchTool, primeFiles: primeSearchFiles } = require('./fileSearch');
+const { primeFiles: primeCodeFiles } = require('~/server/services/Files/Code/process');
 const { getUserPluginAuthValue } = require('~/server/services/PluginService');
-const { createMCPTool, createMCPTools } = require('~/server/services/MCP');
 const { loadAuthValues } = require('~/server/services/Tools/credentials');
-const { getCachedTools } = require('~/server/services/Config');
-const { getRoleByName } = require('~/models/Role');
+const { getMCPServerTools } = require('~/server/services/Config');
+const { getMCPServersRegistry } = require('~/config');
+const { getRoleByName } = require('~/models');
 
 /**
  * Validates the availability and authentication of tools for a user based on environment variables or user-specific plugin authentication values.
@@ -174,43 +185,15 @@ const loadTools = async ({
   };
 
   const customConstructors = {
-    serpapi: async (_toolContextMap) => {
-      const authFields = getAuthFields('serpapi');
-      let envVar = authFields[0] ?? '';
-      let apiKey = process.env[envVar];
-      if (!apiKey) {
-        apiKey = await getUserPluginAuthValue(user, envVar);
-      }
-      return new SerpAPI(apiKey, {
-        location: 'Austin,Texas,United States',
-        hl: 'en',
-        gl: 'us',
-      });
-    },
-    youtube: async (_toolContextMap) => {
-      const authFields = getAuthFields('youtube');
-      const authValues = await loadAuthValues({ userId: user, authFields });
-      return createYouTubeTools(authValues);
-    },
     image_gen_oai: async (toolContextMap) => {
       const authFields = getAuthFields('image_gen_oai');
       const authValues = await loadAuthValues({ userId: user, authFields });
       const imageFiles = options.tool_resources?.[EToolResources.image_edit]?.files ?? [];
-      let toolContext = '';
-      for (let i = 0; i < imageFiles.length; i++) {
-        const file = imageFiles[i];
-        if (!file) {
-          continue;
-        }
-        if (i === 0) {
-          toolContext =
-            'Image files provided in this request (their image IDs listed in order of appearance) available for image editing:';
-        }
-        toolContext += `\n\t- ${file.file_id}`;
-        if (i === imageFiles.length - 1) {
-          toolContext += `\n\nInclude any you need in the \`image_ids\` array when calling \`${EToolResources.image_edit}_oai\`. You may also include previously referenced or generated image IDs.`;
-        }
-      }
+      const toolContext = buildImageToolContext({
+        imageFiles,
+        toolName: `${EToolResources.image_edit}_oai`,
+        contextDescription: 'image editing',
+      });
       if (toolContext) {
         toolContextMap.image_edit_oai = toolContext;
       }
@@ -221,6 +204,27 @@ const loadTools = async ({
         imageOutputType,
         fileStrategy,
         imageFiles,
+      });
+    },
+    gemini_image_gen: async (toolContextMap) => {
+      const authFields = getAuthFields('gemini_image_gen');
+      const authValues = await loadAuthValues({ userId: user, authFields, throwError: false });
+      const imageFiles = options.tool_resources?.[EToolResources.image_edit]?.files ?? [];
+      const toolContext = buildImageToolContext({
+        imageFiles,
+        toolName: 'gemini_image_gen',
+        contextDescription: 'image context',
+      });
+      if (toolContext) {
+        toolContextMap.gemini_image_gen = toolContext;
+      }
+      return createGeminiImageTool({
+        ...authValues,
+        isAgent: !!agent,
+        req: options.req,
+        imageFiles,
+        userId: user,
+        fileStrategy,
       });
     },
   };
@@ -245,13 +249,18 @@ const loadTools = async ({
     flux: imageGenOptions,
     dalle: imageGenOptions,
     'stable-diffusion': imageGenOptions,
-    serpapi: { location: 'Austin,Texas,United States', hl: 'en', gl: 'us' },
+    gemini_image_gen: imageGenOptions,
   };
 
   /** @type {Record<string, string>} */
   const toolContextMap = {};
-  const cachedTools = (await getCachedTools({ userId: user, includeGlobal: true })) ?? {};
   const requestedMCPTools = {};
+
+  /** Resolve config-source servers for the current user/tenant context */
+  let configServers;
+  if (tools.some((tool) => tool && mcpToolPattern.test(tool))) {
+    configServers = await resolveConfigServers(options.req);
+  }
 
   for (const tool of tools) {
     if (tool === Tools.execute_code) {
@@ -307,7 +316,7 @@ const loadTools = async ({
         }
 
         return createFileSearchTool({
-          req: options.req,
+          userId: user,
           files,
           entity_id: agent?.id,
           fileCitations,
@@ -322,16 +331,7 @@ const loadTools = async ({
       });
       const { onSearchResults, onGetHighlights } = options?.[Tools.web_search] ?? {};
       requestedTools[tool] = async () => {
-        toolContextMap[tool] = `# \`${tool}\`:
-Current Date & Time: ${replaceSpecialVars({ text: '{{iso_datetime}}' })}
-1. **Execute immediately without preface** when using \`${tool}\`.
-2. **After the search, begin with a brief summary** that directly addresses the query without headers or explaining your process.
-3. **Structure your response clearly** using Markdown formatting (Level 2 headers for sections, lists for multiple points, tables for comparisons).
-4. **Cite sources properly** according to the citation anchor format, utilizing group anchors when appropriate.
-5. **Tailor your approach to the query type** (academic, news, coding, etc.) while maintaining an expert, journalistic, unbiased tone.
-6. **Provide comprehensive information** with specific details, examples, and as much relevant context as possible from search results.
-7. **Avoid moralizing language.**
-`.trim();
+        toolContextMap[tool] = buildWebSearchContext();
         return createSearchTool({
           ...result.authResult,
           onSearchResults,
@@ -340,51 +340,52 @@ Current Date & Time: ${replaceSpecialVars({ text: '{{iso_datetime}}' })}
         });
       };
       continue;
-    } else if (tool && cachedTools && mcpToolPattern.test(tool)) {
+    } else if (tool && mcpToolPattern.test(tool)) {
       const [toolName, serverName] = tool.split(Constants.mcp_delimiter);
       if (toolName === Constants.mcp_server) {
         /** Placeholder used for UI purposes */
         continue;
       }
-      if (serverName && options.req?.config?.mcpConfig?.[serverName] == null) {
+      const serverConfig = serverName
+        ? await getMCPServersRegistry().getServerConfig(serverName, user, configServers)
+        : null;
+      if (!serverConfig) {
         logger.warn(
           `MCP server "${serverName}" for "${toolName}" tool is not configured${agent?.id != null && agent.id ? ` but attached to "${agent.id}"` : ''}`,
         );
         continue;
       }
       if (toolName === Constants.mcp_all) {
-        const currentMCPGenerator = async (index) =>
-          createMCPTools({
-            req: options.req,
-            res: options.res,
-            index,
+        requestedMCPTools[serverName] = [
+          {
+            type: 'all',
             serverName,
-            userMCPAuthMap,
-            model: agent?.model ?? model,
-            provider: agent?.provider ?? endpoint,
-            signal,
-          });
-        requestedMCPTools[serverName] = [currentMCPGenerator];
+            config: serverConfig,
+          },
+        ];
         continue;
       }
-      const currentMCPGenerator = async (index) =>
-        createMCPTool({
-          index,
-          req: options.req,
-          res: options.res,
-          toolKey: tool,
-          userMCPAuthMap,
-          model: agent?.model ?? model,
-          provider: agent?.provider ?? endpoint,
-          signal,
-        });
+
       requestedMCPTools[serverName] = requestedMCPTools[serverName] || [];
-      requestedMCPTools[serverName].push(currentMCPGenerator);
+      requestedMCPTools[serverName].push({
+        type: 'single',
+        toolKey: tool,
+        serverName,
+        config: serverConfig,
+      });
       continue;
     }
 
-    if (customConstructors[tool]) {
-      requestedTools[tool] = async () => customConstructors[tool](toolContextMap);
+    const toolKey = customConstructors[tool] ? tool : toolkitParent[tool];
+    if (toolKey && customConstructors[toolKey]) {
+      if (!requestedTools[toolKey]) {
+        let cached;
+        requestedTools[toolKey] = async () => {
+          cached ??= customConstructors[toolKey](toolContextMap);
+          return cached;
+        };
+      }
+      requestedTools[tool] = requestedTools[toolKey];
       continue;
     }
 
@@ -422,24 +423,69 @@ Current Date & Time: ${replaceSpecialVars({ text: '{{iso_datetime}}' })}
   const mcpToolPromises = [];
   /** MCP server tools are initialized sequentially by server */
   let index = -1;
-  for (const [serverName, generators] of Object.entries(requestedMCPTools)) {
+  const failedMCPServers = new Set();
+  const safeUser = createSafeUser(options.req?.user);
+
+  for (const [serverName, toolConfigs] of Object.entries(requestedMCPTools)) {
     index++;
-    for (const generator of generators) {
+    /** @type {LCAvailableTools} */
+    let availableTools;
+    for (const config of toolConfigs) {
       try {
-        if (generator && generators.length === 1) {
+        if (failedMCPServers.has(serverName)) {
+          continue;
+        }
+        const mcpParams = {
+          index,
+          signal,
+          user: safeUser,
+          userMCPAuthMap,
+          configServers,
+          res: options.res,
+          streamId: options.req?._resumableStreamId || null,
+          model: agent?.model ?? model,
+          serverName: config.serverName,
+          provider: agent?.provider ?? endpoint,
+          config: config.config,
+        };
+
+        if (config.type === 'all' && toolConfigs.length === 1) {
+          /** Handle async loading for single 'all' tool config */
           mcpToolPromises.push(
-            generator(index).catch((error) => {
+            createMCPTools(mcpParams).catch((error) => {
               logger.error(`Error loading ${serverName} tools:`, error);
               return null;
             }),
           );
           continue;
         }
-        const mcpTool = await generator(index);
+        if (!availableTools) {
+          try {
+            availableTools = await getMCPServerTools(safeUser.id, serverName);
+          } catch (error) {
+            logger.error(`Error fetching available tools for MCP server ${serverName}:`, error);
+          }
+        }
+
+        /** Handle synchronous loading */
+        const mcpTool =
+          config.type === 'all'
+            ? await createMCPTools(mcpParams)
+            : await createMCPTool({
+                ...mcpParams,
+                availableTools,
+                toolKey: config.toolKey,
+              });
+
         if (Array.isArray(mcpTool)) {
           loadedTools.push(...mcpTool);
         } else if (mcpTool) {
           loadedTools.push(mcpTool);
+        } else {
+          failedMCPServers.add(serverName);
+          logger.warn(
+            `MCP tool creation failed for "${config.toolKey}", server may be unavailable or unauthenticated.`,
+          );
         }
       } catch (error) {
         logger.error(`Error loading MCP tool for server ${serverName}:`, error);

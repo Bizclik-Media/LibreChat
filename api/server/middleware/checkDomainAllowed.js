@@ -1,5 +1,5 @@
 const { logger } = require('@librechat/data-schemas');
-const { isEmailDomainAllowed } = require('~/server/services/domains');
+const { isEmailDomainAllowed } = require('@librechat/api');
 const { getAppConfig } = require('~/server/services/Config');
 
 /**
@@ -18,6 +18,7 @@ const checkDomainAllowed = async (req, res, next) => {
     const email = req?.user?.email;
     const appConfig = await getAppConfig({
       role: req?.user?.role,
+      tenantId: req?.user?.tenantId,
     });
 
     if (email && !isEmailDomainAllowed(email, appConfig?.registration?.allowedDomains)) {
