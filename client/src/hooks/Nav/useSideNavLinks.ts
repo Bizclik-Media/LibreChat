@@ -1,6 +1,13 @@
 import { useMemo } from 'react';
-import { Blocks, MCPIcon, AttachmentIcon } from '@librechat/client';
-import { Database, Bookmark, Settings2, ArrowRightToLine, MessageSquareQuote } from 'lucide-react';
+import { MCPIcon, AttachmentIcon, OpenAIMinimalIcon } from '@librechat/client';
+import {
+  Bot,
+  Brain,
+  Bookmark,
+  NotebookPen,
+  ArrowRightToLine,
+  SlidersHorizontal,
+} from 'lucide-react';
 import {
   Permissions,
   EModelEndpoint,
@@ -11,16 +18,15 @@ import {
 } from 'librechat-data-provider';
 import type { TInterfaceConfig, TEndpointsConfig } from 'librechat-data-provider';
 import type { NavLink } from '~/common';
+import MCPBuilderPanel from '~/components/SidePanel/MCPBuilder/MCPBuilderPanel';
 import AgentPanelSwitch from '~/components/SidePanel/Agents/AgentPanelSwitch';
 import BookmarkPanel from '~/components/SidePanel/Bookmarks/BookmarkPanel';
-import MemoryViewer from '~/components/SidePanel/Memories/MemoryViewer';
 import PanelSwitch from '~/components/SidePanel/Builder/PanelSwitch';
-import PromptsAccordion from '~/components/Prompts/PromptsAccordion';
 import Parameters from '~/components/SidePanel/Parameters/Panel';
+import { MemoryPanel } from '~/components/SidePanel/Memories';
 import FilesPanel from '~/components/SidePanel/Files/Panel';
-import MCPPanel from '~/components/SidePanel/MCP/MCPPanel';
-import { useGetStartupConfig } from '~/data-provider';
-import { useHasAccess } from '~/hooks';
+import { useHasAccess, useMCPServerManager } from '~/hooks';
+import { PromptsAccordion } from '~/components/Prompts';
 
 export default function useSideNavLinks({
   hidePanel,
@@ -29,13 +35,15 @@ export default function useSideNavLinks({
   endpointType,
   interfaceConfig,
   endpointsConfig,
+  includeHidePanel = true,
 }: {
-  hidePanel: () => void;
+  hidePanel?: () => void;
   keyProvided: boolean;
   endpoint?: EModelEndpoint | null;
   endpointType?: EModelEndpoint | null;
   interfaceConfig: Partial<TInterfaceConfig>;
   endpointsConfig: TEndpointsConfig;
+  includeHidePanel?: boolean;
 }) {
   const hasAccessToPrompts = useHasAccess({
     permissionType: PermissionTypes.PROMPTS,
@@ -61,10 +69,34 @@ export default function useSideNavLinks({
     permissionType: PermissionTypes.AGENTS,
     permission: Permissions.CREATE,
   });
-  const { data: startupConfig } = useGetStartupConfig();
+  const hasAccessToUseMCPSettings = useHasAccess({
+    permissionType: PermissionTypes.MCP_SERVERS,
+    permission: Permissions.USE,
+  });
+  const hasAccessToCreateMCP = useHasAccess({
+    permissionType: PermissionTypes.MCP_SERVERS,
+    permission: Permissions.CREATE,
+  });
+  const { availableMCPServers } = useMCPServerManager();
 
   const Links = useMemo(() => {
     const links: NavLink[] = [];
+
+    if (
+      endpointsConfig?.[EModelEndpoint.agents] &&
+      hasAccessToAgents &&
+      hasAccessToCreateAgents &&
+      endpointsConfig[EModelEndpoint.agents].disableBuilder !== true
+    ) {
+      links.push({
+        title: 'com_sidepanel_agent_builder',
+        label: '',
+        icon: Bot,
+        id: EModelEndpoint.agents,
+        Component: AgentPanelSwitch,
+      });
+    }
+
     if (
       isAssistantsEndpoint(endpoint) &&
       ((endpoint === EModelEndpoint.assistants &&
@@ -78,24 +110,9 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_sidepanel_assistant_builder',
         label: '',
-        icon: Blocks,
+        icon: OpenAIMinimalIcon,
         id: EModelEndpoint.assistants,
         Component: PanelSwitch,
-      });
-    }
-
-    if (
-      endpointsConfig?.[EModelEndpoint.agents] &&
-      hasAccessToAgents &&
-      hasAccessToCreateAgents &&
-      endpointsConfig[EModelEndpoint.agents].disableBuilder !== true
-    ) {
-      links.push({
-        title: 'com_sidepanel_agent_builder',
-        label: '',
-        icon: Blocks,
-        id: EModelEndpoint.agents,
-        Component: AgentPanelSwitch,
       });
     }
 
@@ -103,7 +120,7 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_ui_prompts',
         label: '',
-        icon: MessageSquareQuote,
+        icon: NotebookPen,
         id: 'prompts',
         Component: PromptsAccordion,
       });
@@ -113,34 +130,11 @@ export default function useSideNavLinks({
       links.push({
         title: 'com_ui_memories',
         label: '',
-        icon: Database,
+        icon: Brain,
         id: 'memories',
-        Component: MemoryViewer,
+        Component: MemoryPanel,
       });
     }
-
-    if (
-      interfaceConfig.parameters === true &&
-      isParamEndpoint(endpoint ?? '', endpointType ?? '') === true &&
-      !isAgentsEndpoint(endpoint) &&
-      keyProvided
-    ) {
-      links.push({
-        title: 'com_sidepanel_parameters',
-        label: '',
-        icon: Settings2,
-        id: 'parameters',
-        Component: Parameters,
-      });
-    }
-
-    links.push({
-      title: 'com_sidepanel_attach_files',
-      label: '',
-      icon: AttachmentIcon,
-      id: 'files',
-      Component: FilesPanel,
-    });
 
     if (hasAccessToBookmarks) {
       links.push({
@@ -152,47 +146,70 @@ export default function useSideNavLinks({
       });
     }
 
+    links.push({
+      title: 'com_sidepanel_attach_files',
+      label: '',
+      icon: AttachmentIcon,
+      id: 'files',
+      Component: FilesPanel,
+    });
+
     if (
-      startupConfig?.mcpServers &&
-      Object.values(startupConfig.mcpServers).some(
-        (server: any) =>
-          (server.customUserVars && Object.keys(server.customUserVars).length > 0) ||
-          server.isOAuth ||
-          server.startup === false,
-      )
+      interfaceConfig.parameters === true &&
+      isParamEndpoint(endpoint ?? '', endpointType ?? '') === true &&
+      !isAgentsEndpoint(endpoint) &&
+      keyProvided
+    ) {
+      links.push({
+        title: 'com_sidepanel_parameters',
+        label: '',
+        icon: SlidersHorizontal,
+        id: 'parameters',
+        Component: Parameters,
+      });
+    }
+
+    if (
+      (hasAccessToUseMCPSettings && availableMCPServers && availableMCPServers.length > 0) ||
+      hasAccessToCreateMCP
     ) {
       links.push({
         title: 'com_nav_setting_mcp',
         label: '',
         icon: MCPIcon,
-        id: 'mcp-settings',
-        Component: MCPPanel,
+        id: 'mcp-builder',
+        Component: MCPBuilderPanel,
       });
     }
 
-    links.push({
-      title: 'com_sidepanel_hide_panel',
-      label: '',
-      icon: ArrowRightToLine,
-      onClick: hidePanel,
-      id: 'hide-panel',
-    });
+    if (includeHidePanel && hidePanel) {
+      links.push({
+        title: 'com_sidepanel_hide_panel',
+        label: '',
+        icon: ArrowRightToLine,
+        onClick: hidePanel,
+        id: 'hide-panel',
+      });
+    }
 
     return links;
   }, [
-    endpointsConfig,
-    interfaceConfig.parameters,
-    keyProvided,
-    endpointType,
     endpoint,
+    endpointsConfig,
+    keyProvided,
     hasAccessToAgents,
+    hasAccessToCreateAgents,
     hasAccessToPrompts,
     hasAccessToMemories,
     hasAccessToReadMemories,
+    interfaceConfig.parameters,
+    endpointType,
     hasAccessToBookmarks,
-    hasAccessToCreateAgents,
+    availableMCPServers,
+    hasAccessToUseMCPSettings,
+    hasAccessToCreateMCP,
+    includeHidePanel,
     hidePanel,
-    startupConfig,
   ]);
 
   return Links;

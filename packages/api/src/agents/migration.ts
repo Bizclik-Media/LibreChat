@@ -1,19 +1,13 @@
 import { logger } from '@librechat/data-schemas';
-import { AccessRoleIds, ResourceType, PrincipalType, Constants } from 'librechat-data-provider';
+import { AccessRoleIds, ResourceType, PrincipalType } from 'librechat-data-provider';
+import { ensureRequiredCollectionsExist } from '../db/utils';
 import type { AccessRoleMethods, IAgent } from '@librechat/data-schemas';
-import type { Model, Mongoose, mongo } from 'mongoose';
+import type { Model, Mongoose } from 'mongoose';
 
-const { GLOBAL_PROJECT_NAME } = Constants;
+const GLOBAL_PROJECT_NAME = 'instance';
 
 export interface MigrationCheckDbMethods {
   findRoleByIdentifier: AccessRoleMethods['findRoleByIdentifier'];
-  getProjectByName: (
-    projectName: string,
-    fieldsToSelect?: string[] | null,
-  ) => Promise<{
-    agentIds?: string[];
-    [key: string]: unknown;
-  } | null>;
 }
 
 export interface MigrationCheckParams {
@@ -23,7 +17,7 @@ export interface MigrationCheckParams {
 }
 
 interface AgentMigrationData {
-  _id: string;
+  _id: unknown;
   id: string;
   name: string;
   author: string;
@@ -54,34 +48,11 @@ export async function checkAgentPermissionsMigration({
   logger.debug('Checking if agent permissions migration is needed');
 
   try {
-    /** Ensurse `aclentries` collection exists for DocumentDB compatibility */
-    async function ensureCollectionExists(db: mongo.Db, collectionName: string) {
-      try {
-        const collections = await db.listCollections({ name: collectionName }).toArray();
-        if (collections.length === 0) {
-          await db.createCollection(collectionName);
-          logger.info(`Created collection: ${collectionName}`);
-        } else {
-          logger.debug(`Collection already exists: ${collectionName}`);
-        }
-      } catch (error) {
-        logger.error(`'Failed to check/create "${collectionName}" collection:`, error);
-        // If listCollections fails, try alternative approach
-        try {
-          // Try to access the collection directly - this will create it in MongoDB if it doesn't exist
-          await db.collection(collectionName).findOne({}, { projection: { _id: 1 } });
-        } catch (createError) {
-          logger.error(`Could not ensure collection ${collectionName} exists:`, createError);
-        }
-      }
-    }
-
     const db = mongoose.connection.db;
     if (db) {
-      await ensureCollectionExists(db, 'aclentries');
+      await ensureRequiredCollectionsExist(db);
     }
 
-    // Verify required roles exist
     const ownerRole = await methods.findRoleByIdentifier(AccessRoleIds.AGENT_OWNER);
     const viewerRole = await methods.findRoleByIdentifier(AccessRoleIds.AGENT_VIEWER);
     const editorRole = await methods.findRoleByIdentifier(AccessRoleIds.AGENT_EDITOR);
@@ -98,52 +69,26 @@ export async function checkAgentPermissionsMigration({
       };
     }
 
-    // Get global project agent IDs
-    const globalProject = await methods.getProjectByName(GLOBAL_PROJECT_NAME, ['agentIds']);
-    const globalAgentIds = new Set(globalProject?.agentIds || []);
+    let globalAgentIds = new Set<string>();
+    if (db) {
+      const project = await db
+        .collection('projects')
+        .findOne({ name: GLOBAL_PROJECT_NAME }, { projection: { agentIds: 1 } });
+      globalAgentIds = new Set(project?.agentIds || []);
+    }
 
-    // Find agents without ACL entries (no batching for efficiency on startup)
-    const agentsToMigrate: AgentMigrationData[] = await AgentModel.aggregate([
-      {
-        $lookup: {
-          from: 'aclentries',
-          localField: '_id',
-          foreignField: 'resourceId',
-          as: 'aclEntries',
-        },
-      },
-      {
-        $addFields: {
-          userAclEntries: {
-            $filter: {
-              input: '$aclEntries',
-              as: 'aclEntry',
-              cond: {
-                $and: [
-                  { $eq: ['$$aclEntry.resourceType', ResourceType.AGENT] },
-                  { $eq: ['$$aclEntry.principalType', PrincipalType.USER] },
-                ],
-              },
-            },
-          },
-        },
-      },
-      {
-        $match: {
-          author: { $exists: true, $ne: null },
-          userAclEntries: { $size: 0 },
-        },
-      },
-      {
-        $project: {
-          _id: 1,
-          id: 1,
-          name: 1,
-          author: 1,
-          isCollaborative: 1,
-        },
-      },
-    ]);
+    const AclEntry = mongoose.model('AclEntry');
+    const migratedAgentIds = await AclEntry.distinct('resourceId', {
+      resourceType: ResourceType.AGENT,
+      principalType: PrincipalType.USER,
+    });
+
+    const agentsToMigrate = (await AgentModel.find({
+      _id: { $nin: migratedAgentIds },
+      author: { $exists: true, $ne: null },
+    })
+      .select('_id id name author isCollaborative')
+      .lean()) as unknown as AgentMigrationData[];
 
     const categories: {
       globalEditAccess: AgentMigrationData[];
@@ -175,7 +120,6 @@ export async function checkAgentPermissionsMigration({
       privateAgents: categories.privateAgents.length,
     };
 
-    // Add details for debugging
     if (agentsToMigrate.length > 0) {
       result.details = {
         globalEditAccess: categories.globalEditAccess.map((a) => ({
@@ -203,7 +147,6 @@ export async function checkAgentPermissionsMigration({
     return result;
   } catch (error) {
     logger.error('Failed to check agent permissions migration', error);
-    // Return zero counts on error to avoid blocking startup
     return {
       totalToMigrate: 0,
       globalEditAccess: 0,
@@ -221,7 +164,6 @@ export function logAgentMigrationWarning(result: MigrationCheckResult): void {
     return;
   }
 
-  // Create a visible warning box
   const border = '='.repeat(80);
   const warning = [
     '',
@@ -252,10 +194,8 @@ export function logAgentMigrationWarning(result: MigrationCheckResult): void {
     '',
   ];
 
-  // Use console methods directly for visibility
   console.log('\n' + warning.join('\n') + '\n');
 
-  // Also log with logger for consistency
   logger.warn('Agent permissions migration required', {
     totalToMigrate: result.totalToMigrate,
     globalEditAccess: result.globalEditAccess,

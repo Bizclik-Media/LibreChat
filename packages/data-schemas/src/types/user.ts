@@ -1,7 +1,9 @@
 import type { Document, Types } from 'mongoose';
+import type { TUserFavorite } from 'librechat-data-provider';
 import { CursorPaginationParams } from '~/common';
 
 export interface IUser extends Document {
+  _id: Types.ObjectId;
   name?: string;
   username?: string;
   email: string;
@@ -18,10 +20,16 @@ export interface IUser extends Document {
   githubId?: string;
   discordId?: string;
   appleId?: string;
-  plugins?: unknown[];
+  plugins?: string[];
   twoFactorEnabled?: boolean;
   totpSecret?: string;
   backupCodes?: Array<{
+    codeHash: string;
+    used: boolean;
+    usedAt?: Date | null;
+  }>;
+  pendingTotpSecret?: string;
+  pendingBackupCodes?: Array<{
     codeHash: string;
     used: boolean;
     usedAt?: Date | null;
@@ -34,10 +42,21 @@ export interface IUser extends Document {
   personalization?: {
     memories?: boolean;
   };
+  favorites?: TUserFavorite[];
   createdAt?: Date;
   updatedAt?: Date;
   /** Field for external source identification (for consistency with TPrincipal schema) */
   idOnTheSource?: string;
+  tenantId?: string;
+  federatedTokens?: OIDCTokens;
+  openidTokens?: OIDCTokens;
+}
+
+export interface OIDCTokens {
+  access_token?: string;
+  id_token?: string;
+  refresh_token?: string;
+  expires_at?: number;
 }
 
 export interface BalanceConfig {
